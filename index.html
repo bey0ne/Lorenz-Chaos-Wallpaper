@@ -23,7 +23,7 @@
 const cfg = {
   count: 900,          // nombre de particules
   trail: 170,          // longueur des traînées (en ticks de 1/60 s)
-  speed: 1.6,          // vitesse de simulation
+  speed: 0.8,          // vitesse de simulation
   palette: 0,          // 0 spectre, 1 néon, 2 aurore, 3 braise, 4 glacier, 5 or, 6 perso
   custom: [0.48, 0.18, 1.0],
   hueSpeed: 0.05,      // défilement des couleurs
@@ -31,9 +31,10 @@ const cfg = {
   bloom: 1.0,
   brightness: 1.0,
   heads: 1.0,          // éclat des têtes de particules
-  autoRotate: 0.15,    // rad/s
-  sway: 1.0,           // balancement de la caméra (tangage, roulis, travelling)
-  morph: 1.0,          // respiration de la forme (paramètres de Lorenz qui varient)
+  autoRotate: 0,       // rad/s
+  smooth: 4,           // lissage des courbes (subdivisions par segment, calculées sur le GPU)
+  sway: 0,             // balancement de la caméra (tangage, roulis, travelling)
+  morph: 0,            // respiration de la forme (paramètres de Lorenz qui varient)
   mouse: true,
   mouseStrength: 1.0,
   stars: 1.0,
@@ -99,7 +100,7 @@ vec3 palette(float t) {
   return mix(uPal[i], uPal[(i + 1) % 4], smoothstep(0.0, 1.0, fract(t)));
 }
 vec4 project(vec3 s, out float depth) {
-  vec3 w = vec3(s.x, s.z - uZc, s.y) * uScale;
+  vec3 w = vec3(s.x, s.y, s.z - uZc) * uScale;
   w = uRot * w;
   float zc = uDist - w.z;
   depth = clamp((zc - uDist + 1.25) / 2.5, 0.0, 1.0);
@@ -112,15 +113,24 @@ vec4 fetch(int p, int k) { return texelFetch(uHist, ivec2((uHead - k + uL * 8) %
 
 const LINE_VS = COMMON + `
 out vec3 vCol;
+uniform int uSub;
 void main() {
+  // chaque intervalle entre deux points d'historique est découpé en uSub morceaux (spline Catmull-Rom)
   int seg = gl_VertexID >> 1;
-  int kSeg = seg % (uL - 1);
-  int p = seg / (uL - 1);
+  int perP = (uL - 1) * uSub;
+  int p = seg / perP;
+  int r = seg % perP;
+  int kSeg = r / uSub;
   if (kSeg + 1 >= uFilled) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); vCol = vec3(0.0); return; }
-  int k = kSeg + (gl_VertexID & 1);
-  vec4 s = fetch(p, k);
+  float u = float(r % uSub + (gl_VertexID & 1)) / float(uSub);
+  vec4 p0 = fetch(p, max(kSeg - 1, 0));
+  vec4 p1 = fetch(p, kSeg);
+  vec4 p2 = fetch(p, kSeg + 1);
+  vec4 p3 = fetch(p, min(kSeg + 2, uFilled - 1));
+  float u2 = u * u, u3 = u2 * u;
+  vec4 s = 0.5 * (2.0 * p1 + (p2 - p0) * u + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u2 + (3.0 * p1 - p0 - 3.0 * p2 + p3) * u3);
   float d; gl_Position = project(s.xyz, d);
-  float age = float(k) / float(uL - 1);
+  float age = (float(kSeg) + u) / float(uL - 1);
   float fade = pow(1.0 - age, 1.8);
   vec3 c = palette(hueAt(s.xyz, p) + age * 0.08);
   c = mix(c, vec3(1.0), smoothstep(150.0, 280.0, s.w) * 0.2);   // zones rapides = plus blanches
@@ -406,9 +416,9 @@ function updatePalette() {
 }
 
 /* ---------------------------- Interaction ---------------------------- */
-let mxT = 0, myT = 0, mx = 0, my = 0, lastMove = 0;
+let mxT = 0, myT = 0.2, mx = 0, my = 0.2;           // 0.2 -> inclinaison de départ 0.4 rad, comme l'original
 addEventListener('pointermove', e => {
-  mxT = e.clientX / innerWidth * 2 - 1; myT = e.clientY / innerHeight * 2 - 1; lastMove = performance.now();
+  mxT = e.clientX / innerWidth * 2 - 1; myT = e.clientY / innerHeight * 2 - 1;
 });
 addEventListener('resize', resize);
 
@@ -422,7 +432,7 @@ if (window.wallpaperRegisterAudioListener) window.wallpaperRegisterAudioListener
 
 window.wallpaperPropertyListener = {
   applyUserProperties(p) {
-    const num = ['count', 'trail', 'speed', 'hueSpeed', 'spread', 'bloom', 'brightness', 'heads', 'autoRotate', 'sway', 'morph', 'mouseStrength', 'stars', 'nebula', 'audioGain'];
+    const num = ['count', 'trail', 'speed', 'hueSpeed', 'spread', 'bloom', 'brightness', 'heads', 'autoRotate', 'smooth', 'sway', 'morph', 'mouseStrength', 'stars', 'nebula', 'audioGain'];
     let realloc = false, pal = false;
     for (const k of num) if (p[k]) { const v = +p[k].value; if (k === 'count' || k === 'trail') realloc ||= v !== cfg[k]; cfg[k] = v; }
     for (const k of ['mouse', 'audio', 'ribbon']) if (p[k]) { if (k === 'ribbon') realloc ||= !!p[k].value !== cfg.ribbon; cfg[k] = !!p[k].value; }
@@ -450,9 +460,11 @@ const rotBuf = new Float32Array(9);
 function rotation(yaw, pitch, roll) {
   const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch), cr = Math.cos(roll), sr = Math.sin(roll);
   const basis = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  // même ordre que la version d'origine : inclinaison autour de X, puis rotation autour de Y
   basis.forEach(([x, y, z], c) => {
-    [x, z] = [cy * x + sy * z, -sy * x + cy * z];
-    [y, z] = [cp * y - sp * z, sp * y + cp * z];
+    [y, z] = [y * cp - z * sp, y * sp + z * cp];
+    [x, z] = [x * cy + z * sy, -x * sy + z * cy];
+    y = -y; z = -z;                                   // repère canvas (y vers le bas) -> WebGL
     [x, y] = [cr * x - sr * y, sr * x + cr * y];
     rotBuf[c * 3] = x; rotBuf[c * 3 + 1] = y; rotBuf[c * 3 + 2] = z;
   });
@@ -492,14 +504,14 @@ function frame(now) {
 
   // caméra : orbite lente + parallaxe souris amortie
   yaw += dt * cfg.autoRotate;
-  const idle = now - lastMove > 6000;
-  const k = 1 - Math.pow(0.04, dt);
-  const tx = cfg.mouse && !idle ? mxT * cfg.mouseStrength : 0, ty = cfg.mouse && !idle ? myT * cfg.mouseStrength : 0;
+  // souris comme dans l'original : position absolue -> angle (±2 rad sur chaque axe), l'angle reste où on le laisse
+  const k = 1 - Math.pow(0.0005, dt);
+  const tx = cfg.mouse ? mxT * cfg.mouseStrength : 0, ty = cfg.mouse ? myT * cfg.mouseStrength : 0.2;
   mx += (tx - mx) * k; my += (ty - my) * k;
   const cam = {
     t: t + t0,
-    yaw: yaw + Math.sin(T * 0.11) * 0.5 * cfg.sway + mx * 1.1,
-    pitch: 0.22 + Math.sin(T * 0.13) * 0.32 * cfg.sway + my * 0.55,
+    yaw: yaw + Math.sin(T * 0.11) * 0.5 * cfg.sway + mx * 2,
+    pitch: Math.sin(T * 0.13) * 0.32 * cfg.sway + my * 2,
     dist: 3.6 + Math.sin(T * 0.09) * 0.45 * cfg.sway - bass * 0.2,
     roll: Math.sin(T * 0.07) * 0.16 * cfg.sway,
     focal: 1 / Math.tan((38 * Math.PI / 180) / 2),
@@ -516,7 +528,9 @@ function frame(now) {
 
   gl.useProgram(P_LINE.p); bindCommon(P_LINE.u, cam);
   gl.uniform1f(P_LINE.u.uIntensity, intensity);
-  gl.drawArrays(gl.LINES, 0, N * (L - 1) * 2);
+  const sub = Math.max(1, Math.min(8, cfg.smooth | 0));
+  gl.uniform1i(P_LINE.u.uSub, sub);
+  gl.drawArrays(gl.LINES, 0, N * (L - 1) * sub * 2);
 
   gl.useProgram(P_HEAD.p); bindCommon(P_HEAD.u, cam);
   gl.uniform1f(P_HEAD.u.uHeadSize, Math.max(2, H / 260));

@@ -11,13 +11,15 @@ parallaxe souris et réaction à l'audio (les basses font pulser le halo).
 
 Autre méthode : Wallpaper Engine → *Ouvrir un fond d'écran* → *Ouvrir depuis un fichier* → `index.html`.
 
-Pour la souris, activer *Paramètres → Général → Interaction souris* dans Wallpaper Engine.
+La souris fait pivoter l'attracteur comme dans la version d'origine : horizontalement pour le tourner,
+verticalement pour l'incliner (vue de dessus, de profil, par la tranche). Pour ça, activer *Paramètres → Général → Interaction souris* dans Wallpaper Engine.
 
 ## Réglages
 
 Tous modifiables dans le panneau du fond d'écran : palette (Spectre, Néon, Aurore, Braise, Glacier,
 Or, couleur du thème), nombre de particules, longueur des traînées, vitesse, luminosité, halo,
-rotation, balancement de la caméra, respiration de la forme, souris, étoiles, nébuleuse, sensibilité audio, départ en ruban.
+lissage des courbes, rotation automatique, balancement de la caméra et respiration de la forme
+(désactivés par défaut), souris, étoiles, nébuleuse, sensibilité audio, départ en ruban.
 
 Dans un navigateur, les mêmes réglages passent en paramètres d'URL, par ex.
 `index.html?palette=3&count=1500&trail=250`.

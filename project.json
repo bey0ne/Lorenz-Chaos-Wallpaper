@@ -72,18 +72,26 @@
 				"value": 170,
 				"editable": true
 			},
-			"speed": {
+			"smooth": {
 				"order": 4,
-				"text": "Vitesse",
+				"text": "Lissage des courbes",
+				"type": "slider",
+				"min": 1,
+				"max": 8,
+				"value": 4
+			},
+			"speed": {
+				"order": 5,
+				"text": "Vitesse des particules",
 				"type": "slider",
 				"fraction": true,
 				"precision": 2,
 				"min": 0.1,
 				"max": 3,
-				"value": 1.6
+				"value": 0.8
 			},
 			"brightness": {
-				"order": 5,
+				"order": 6,
 				"text": "Luminosité",
 				"type": "slider",
 				"fraction": true,
@@ -93,7 +101,7 @@
 				"value": 1
 			},
 			"bloom": {
-				"order": 6,
+				"order": 7,
 				"text": "Halo (bloom)",
 				"type": "slider",
 				"fraction": true,
@@ -103,7 +111,7 @@
 				"value": 1
 			},
 			"heads": {
-				"order": 7,
+				"order": 8,
 				"text": "Éclat des têtes",
 				"type": "slider",
 				"fraction": true,
@@ -113,7 +121,7 @@
 				"value": 1
 			},
 			"hueSpeed": {
-				"order": 8,
+				"order": 9,
 				"text": "Défilement des couleurs",
 				"type": "slider",
 				"fraction": true,
@@ -123,7 +131,7 @@
 				"value": 0.05
 			},
 			"spread": {
-				"order": 9,
+				"order": 10,
 				"text": "Étalement de la palette",
 				"type": "slider",
 				"fraction": true,
@@ -133,43 +141,43 @@
 				"value": 1
 			},
 			"autoRotate": {
-				"order": 10,
+				"order": 11,
 				"text": "Rotation automatique",
 				"type": "slider",
 				"fraction": true,
 				"precision": 2,
 				"min": -0.5,
 				"max": 0.5,
-				"value": 0.15
+				"value": 0
 			},
 			"sway": {
-				"order": 11,
+				"order": 12,
 				"text": "Balancement de la caméra",
 				"type": "slider",
 				"fraction": true,
 				"precision": 2,
 				"min": 0,
 				"max": 2,
-				"value": 1
+				"value": 0
 			},
 			"morph": {
-				"order": 12,
+				"order": 13,
 				"text": "Respiration de la forme",
 				"type": "slider",
 				"fraction": true,
 				"precision": 2,
 				"min": 0,
 				"max": 2,
-				"value": 1
+				"value": 0
 			},
 			"mouse": {
-				"order": 13,
+				"order": 14,
 				"text": "Suivre la souris",
 				"type": "bool",
 				"value": true
 			},
 			"mouseStrength": {
-				"order": 14,
+				"order": 15,
 				"text": "Amplitude souris",
 				"type": "slider",
 				"fraction": true,
@@ -180,7 +188,7 @@
 				"condition": "mouse.value == true"
 			},
 			"stars": {
-				"order": 15,
+				"order": 16,
 				"text": "Étoiles",
 				"type": "slider",
 				"fraction": true,
@@ -190,7 +198,7 @@
 				"value": 1
 			},
 			"nebula": {
-				"order": 16,
+				"order": 17,
 				"text": "Nébuleuse",
 				"type": "slider",
 				"fraction": true,
@@ -200,13 +208,13 @@
 				"value": 1
 			},
 			"audio": {
-				"order": 17,
+				"order": 18,
 				"text": "Réagir à l'audio",
 				"type": "bool",
 				"value": true
 			},
 			"audioGain": {
-				"order": 18,
+				"order": 19,
 				"text": "Sensibilité audio",
 				"type": "slider",
 				"fraction": true,
@@ -217,7 +225,7 @@
 				"condition": "audio.value == true"
 			},
 			"ribbon": {
-				"order": 19,
+				"order": 20,
 				"text": "Départ en ruban (comme l'original)",
 				"type": "bool",
 				"value": false
