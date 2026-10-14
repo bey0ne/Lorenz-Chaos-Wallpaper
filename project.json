@@ -1,0 +1,48 @@
+{
+	"contentrating" : "Everyone",
+	"description" : "Attracteur de Lorenz en 3D : des centaines de trajectoires chaotiques lumineuses, bloom HDR, palettes, réactif à l'audio et à la souris.",
+	"file" : "index.html",
+	"preview" : "preview.jpg",
+	"tags" : [ "Abstract" ],
+	"title" : "Lorenz Chaos",
+	"type" : "web",
+	"visibility" : "private",
+	"general" :
+	{
+		"supportsaudioprocessing" : true,
+		"properties" :
+		{
+			"schemecolor" : { "order" : 0, "text" : "ui_browse_properties_scheme_color", "type" : "color", "value" : "0.48 0.18 1" },
+			"palette" :
+			{
+				"order" : 1, "text" : "Palette", "type" : "combo", "value" : 0,
+				"options" :
+				[
+					{ "label" : "Spectre (original)", "value" : 0 },
+					{ "label" : "Néon", "value" : 1 },
+					{ "label" : "Aurore", "value" : 2 },
+					{ "label" : "Braise", "value" : 3 },
+					{ "label" : "Glacier", "value" : 4 },
+					{ "label" : "Or", "value" : 5 },
+					{ "label" : "Couleur du thème", "value" : 6 }
+				]
+			},
+			"count" : { "order" : 2, "text" : "Particules", "type" : "slider", "min" : 100, "max" : 3000, "value" : 900, "editable" : true },
+			"trail" : { "order" : 3, "text" : "Longueur des traînées", "type" : "slider", "min" : 20, "max" : 400, "value" : 170, "editable" : true },
+			"speed" : { "order" : 4, "text" : "Vitesse", "type" : "slider", "fraction" : true, "precision" : 2, "min" : 0.1, "max" : 3, "value" : 1 },
+			"brightness" : { "order" : 5, "text" : "Luminosité", "type" : "slider", "fraction" : true, "precision" : 2, "min" : 0.2, "max" : 3, "value" : 1 },
+			"bloom" : { "order" : 6, "text" : "Halo (bloom)", "type" : "slider", "fraction" : true, "precision" : 2, "min" : 0, "max" : 3, "value" : 1 },
+			"heads" : { "order" : 7, "text" : "Éclat des têtes", "type" : "slider", "fraction" : true, "precision" : 2, "min" : 0, "max" : 3, "value" : 1 },
+			"hueSpeed" : { "order" : 8, "text" : "Défilement des couleurs", "type" : "slider", "fraction" : true, "precision" : 3, "min" : 0, "max" : 0.2, "value" : 0.02 },
+			"spread" : { "order" : 9, "text" : "Étalement de la palette", "type" : "slider", "fraction" : true, "precision" : 2, "min" : 0, "max" : 4, "value" : 1 },
+			"autoRotate" : { "order" : 10, "text" : "Rotation automatique", "type" : "slider", "fraction" : true, "precision" : 2, "min" : -0.5, "max" : 0.5, "value" : 0.06 },
+			"mouse" : { "order" : 11, "text" : "Suivre la souris", "type" : "bool", "value" : true },
+			"mouseStrength" : { "order" : 12, "text" : "Amplitude souris", "type" : "slider", "fraction" : true, "precision" : 2, "min" : 0, "max" : 2, "value" : 1, "condition" : "mouse.value == true" },
+			"stars" : { "order" : 13, "text" : "Étoiles", "type" : "slider", "fraction" : true, "precision" : 2, "min" : 0, "max" : 3, "value" : 1 },
+			"nebula" : { "order" : 14, "text" : "Nébuleuse", "type" : "slider", "fraction" : true, "precision" : 2, "min" : 0, "max" : 3, "value" : 1 },
+			"audio" : { "order" : 15, "text" : "Réagir à l'audio", "type" : "bool", "value" : true },
+			"audioGain" : { "order" : 16, "text" : "Sensibilité audio", "type" : "slider", "fraction" : true, "precision" : 2, "min" : 0, "max" : 4, "value" : 1, "condition" : "audio.value == true" },
+			"ribbon" : { "order" : 17, "text" : "Départ en ruban (comme l'original)", "type" : "bool", "value" : false }
+		}
+	}
+}
