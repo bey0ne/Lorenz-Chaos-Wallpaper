@@ -44,6 +44,7 @@ const cfg = {
   ribbon: false,       // départ en ruban serré (comme l'original) au lieu d'un attracteur déjà rempli
   fps: 0,
   quality: 0,          // 0 auto (résolution réduite seulement si le GPU ne tient pas la cadence), 1 toujours pleine résolution
+  warp: 0.8,           // accélération au centre / ralentissement sur les bords (0 = vitesses physiques)
   roll: -1,            // rotation de l'image (rad), -1 = auto : 90° sur écran vertical
   zoom: 0,             // recul de la caméra, 0 = auto (s'adapte aux écrans verticaux)
   aa: 1,               // anticrénelage des traînées : 1 analytique (léger), 4 ou 2 MSAA, 0 aucun
@@ -422,16 +423,31 @@ function alloc() {
 }
 
 const stepOut = new Float64Array(4);
+/* Déformation du temps : chaque particule avance plus vite près du centre de l'attracteur et ralentit
+   vers les bords. Le système étant autonome, les trajectoires restent exactement les mêmes : seule la
+   vitesse le long de la courbe change. warpG garde la même vitesse moyenne quel que soit le réglage. */
+let warpG = 1;
 function tick(boost) {
   const h = 0.0025 * cfg.speed * boost;
+  const kw = Math.max(0, cfg.warp) * 3.2, zc = RHO - 3;
+  let sumV = 0, sumVW = 0;
   for (let i = 0; i < N; i++) {
     const j = i * 3;
     let x = pos[j], y = pos[j + 1], z = pos[j + 2], v = 0;
-    for (let s = 0; s < SUB; s++) { lorenzStep(x, y, z, h, stepOut); x = stepOut[0]; y = stepOut[1]; z = stepOut[2]; v = stepOut[3]; }
+    let w = 1;
+    if (kw > 0) {
+      const d = Math.sqrt(x * x + y * y + (z - zc) * (z - zc)) / 24;
+      w = Math.min(4, Math.max(0.1, Math.exp(kw * (0.6 - d)) * warpG));
+    }
+    const hw = h * w;
+    for (let s = 0; s < SUB; s++) { lorenzStep(x, y, z, hw, stepOut); x = stepOut[0]; y = stepOut[1]; z = stepOut[2]; v = stepOut[3]; }
     if (!isFinite(x + y + z)) { x = Math.random() - 0.5; y = 0; z = 20; }
     pos[j] = x; pos[j + 1] = y; pos[j + 2] = z;
-    const k = i * 4; col[k] = x; col[k + 1] = y; col[k + 2] = z; col[k + 3] = v;
+    sumV += v; sumVW += v * w;
+    const k = i * 4; col[k] = x; col[k + 1] = y; col[k + 2] = z; col[k + 3] = v * w;   // vitesse apparente (éclat des zones rapides)
   }
+  if (kw > 0 && sumVW > 0) warpG = Math.min(20, Math.max(0.05, warpG * (1 + (sumV / sumVW - 1) * 0.05)));
+  else warpG = 1;
   head = (head + 1) % L;
   filled = Math.min(filled + 1, L);
   gl.bindTexture(gl.TEXTURE_2D, histTex);
@@ -496,7 +512,7 @@ if (window.wallpaperRegisterAudioListener) window.wallpaperRegisterAudioListener
 
 window.wallpaperPropertyListener = {
   applyUserProperties(p) {
-    const num = ['count', 'trail', 'speed', 'hueSpeed', 'spread', 'bloom', 'brightness', 'heads', 'autoRotate', 'smooth', 'sway', 'morph', 'mouseStrength', 'stars', 'nebula', 'audioGain'];
+    const num = ['warp', 'count', 'trail', 'speed', 'hueSpeed', 'spread', 'bloom', 'brightness', 'heads', 'autoRotate', 'smooth', 'sway', 'morph', 'mouseStrength', 'stars', 'nebula', 'audioGain'];
     let realloc = false, pal = false;
     for (const k of num) if (p[k]) { const v = +p[k].value; if (k === 'count' || k === 'trail') realloc ||= v !== cfg[k]; cfg[k] = v; }
     for (const k of ['mouse', 'audio', 'ribbon']) if (p[k]) { if (k === 'ribbon') realloc ||= !!p[k].value !== cfg.ribbon; cfg[k] = !!p[k].value; }
