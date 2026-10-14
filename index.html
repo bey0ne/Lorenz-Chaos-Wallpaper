@@ -44,6 +44,8 @@ const cfg = {
   ribbon: false,       // départ en ruban serré (comme l'original) au lieu d'un attracteur déjà rempli
   fps: 0,
   quality: 0,          // 0 auto (résolution réduite seulement si le GPU ne tient pas la cadence), 1 toujours pleine résolution
+  roll: -1,            // rotation de l'image (rad), -1 = auto : 90° sur écran vertical
+  zoom: 0,             // recul de la caméra, 0 = auto (s'adapte aux écrans verticaux)
   aa: 1,               // anticrénelage des traînées : 1 analytique (léger), 4 ou 2 MSAA, 0 aucun
 };
 
@@ -260,7 +262,7 @@ void main() {
   bg += nb.rgb * (1.0 + uPulse * 0.6);
 
   // étoiles en trois plans de profondeur : plus elles sont proches, plus elles bougent avec la caméra
-  vec2 fc = gl_FragCoord.xy * (1080.0 / uRes.y);
+  vec2 fc = gl_FragCoord.xy * (1080.0 / min(uRes.x, uRes.y));
   vec3 st = stars(fc + uCam * 25.0, 6.0, 0.05 + nb.a * 0.12, 0.55, 0.0, 0.0) * (0.22 + nb.a * 0.3);
   st += stars(fc + uCam * 60.0, 26.0, 0.14, 0.85, 17.0, 0.0) * 0.45;
   st += stars(fc + uCam * 120.0, 150.0, 0.2, 1.25, 41.0, 1.0) * 0.8;
@@ -612,6 +614,10 @@ function frame(now) {
     roll: Math.sin(T * 0.07) * 0.16 * cfg.sway,
     focal: 1 / Math.tan((38 * Math.PI / 180) / 2),
   };
+  // écran vertical (téléphone, écran pivoté) : l'attracteur est tourné de 90° et la caméra recule pour qu'il tienne en largeur
+  const aspect = W / H, portrait = aspect < 0.95;
+  cam.roll += cfg.roll >= 0 ? cfg.roll : portrait ? 2.25 : 0;                     // les deux ailes l'une au-dessus de l'autre
+  cam.dist *= cfg.zoom > 0 ? cfg.zoom : portrait ? Math.min(2.2, Math.max(1, 0.72 / aspect)) : 1;
   cam.rot = rotation(cam.yaw, cam.pitch, cam.roll);
 
   // 1. scène (traînées 3D + têtes) en HDR, additive, MSAA si possible
@@ -633,7 +639,7 @@ function frame(now) {
   else gl.drawArraysInstanced(gl.LINE_STRIP, 0, (L - 1) * sub + 1, N);
 
   gl.useProgram(P_HEAD.p); bindCommon(P_HEAD.u, cam);
-  gl.uniform1f(P_HEAD.u.uHeadSize, Math.max(2, H / 260));
+  gl.uniform1f(P_HEAD.u.uHeadSize, Math.max(2, Math.min(W, H) / 260));
   gl.uniform1f(P_HEAD.u.uHeadI, 0.9 * cfg.heads * density * (1 + bass));
   gl.drawArrays(gl.POINTS, 0, N);
 
