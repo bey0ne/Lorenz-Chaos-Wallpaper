@@ -17,7 +17,7 @@ Pour la souris, activer *Paramètres → Général → Interaction souris* dans 
 
 Tous modifiables dans le panneau du fond d'écran : palette (Spectre, Néon, Aurore, Braise, Glacier,
 Or, couleur du thème), nombre de particules, longueur des traînées, vitesse, luminosité, halo,
-rotation, souris, étoiles, nébuleuse, sensibilité audio, départ en ruban.
+rotation, balancement de la caméra, respiration de la forme, souris, étoiles, nébuleuse, sensibilité audio, départ en ruban.
 
 Dans un navigateur, les mêmes réglages passent en paramètres d'URL, par ex.
 `index.html?palette=3&count=1500&trail=250`.

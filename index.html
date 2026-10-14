@@ -23,15 +23,17 @@
 const cfg = {
   count: 900,          // nombre de particules
   trail: 170,          // longueur des traînées (en ticks de 1/60 s)
-  speed: 1.0,          // vitesse de simulation
+  speed: 1.6,          // vitesse de simulation
   palette: 0,          // 0 spectre, 1 néon, 2 aurore, 3 braise, 4 glacier, 5 or, 6 perso
   custom: [0.48, 0.18, 1.0],
-  hueSpeed: 0.02,      // défilement des couleurs
+  hueSpeed: 0.05,      // défilement des couleurs
   spread: 1.0,         // étalement de la palette entre particules
   bloom: 1.0,
   brightness: 1.0,
   heads: 1.0,          // éclat des têtes de particules
-  autoRotate: 0.06,    // rad/s
+  autoRotate: 0.15,    // rad/s
+  sway: 1.0,           // balancement de la caméra (tangage, roulis, travelling)
+  morph: 1.0,          // respiration de la forme (paramètres de Lorenz qui varient)
   mouse: true,
   mouseStrength: 1.0,
   stars: 1.0,
@@ -83,7 +85,8 @@ const COMMON = `#version 300 es
 precision highp float; precision highp int; precision highp sampler2D;
 uniform sampler2D uHist;
 uniform int uL, uHead, uFilled;
-uniform float uN, uYaw, uPitch, uDist, uFocal, uAspect, uScale, uTime, uHueSpeed, uSpread, uRainbow, uIntensity;
+uniform mat3 uRot;
+uniform float uZc, uN, uDist, uFocal, uAspect, uScale, uTime, uHueSpeed, uSpread, uRainbow, uIntensity;
 uniform vec3 uPal[4];
 
 vec3 palette(float t) {
@@ -96,11 +99,8 @@ vec3 palette(float t) {
   return mix(uPal[i], uPal[(i + 1) % 4], smoothstep(0.0, 1.0, fract(t)));
 }
 vec4 project(vec3 s, out float depth) {
-  vec3 w = vec3(s.x, s.z - 25.0, s.y) * uScale;
-  float cy = cos(uYaw), sy = sin(uYaw);
-  w = vec3(cy * w.x + sy * w.z, w.y, -sy * w.x + cy * w.z);
-  float cp = cos(uPitch), sp = sin(uPitch);
-  w = vec3(w.x, cp * w.y - sp * w.z, sp * w.y + cp * w.z);
+  vec3 w = vec3(s.x, s.z - uZc, s.y) * uScale;
+  w = uRot * w;
   float zc = uDist - w.z;
   depth = clamp((zc - uDist + 1.25) / 2.5, 0.0, 1.0);
   return vec4(w.x * uFocal / uAspect, w.y * uFocal, 0.0, zc);
@@ -189,7 +189,7 @@ void main() {
 
 const COMP_FS = `#version 300 es
 precision highp float;
-uniform sampler2D uScene, uBloom;
+uniform sampler2D uScene, uBloom, uNeb;
 uniform vec2 uRes, uCam;
 uniform vec3 uTint;
 uniform float uTime, uBloomI, uExposure, uStars, uNebula, uPulse;
@@ -200,7 +200,6 @@ float noise(vec2 p) {
   vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + 1.0), f.x), f.y);
 }
-float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * noise(p); p = p * 2.03 + 17.1; a *= 0.5; } return v; }
 vec3 aces(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 
 void main() {
@@ -210,10 +209,7 @@ void main() {
 
   // fond : abîme indigo + nébuleuse lente teintée par la palette
   vec3 bg = mix(vec3(0.0032, 0.0026, 0.0075), vec3(0.0003, 0.0003, 0.0007), smoothstep(0.0, 0.95, r));
-  vec2 np = p * 1.4 + uCam * 0.08;
-  float n = fbm(np + vec2(uTime * 0.012, -uTime * 0.007));
-  float n2 = fbm(np * 2.2 - vec2(uTime * 0.009, 0.0) + n * 1.7);
-  bg += uTint * pow(n2, 3.2) * 0.05 * uNebula * smoothstep(1.2, 0.05, r) * (1.0 + uPulse * 0.6);
+  bg += texture(uNeb, uv).rgb * (1.0 + uPulse * 0.6);
 
   // étoiles avec léger parallaxe suivant la caméra
   vec2 sc = gl_FragCoord.xy + uCam * uRes.y * 0.05;
@@ -234,13 +230,34 @@ void main() {
   o = vec4(col, 1.0);
 }`;
 
-let P_LINE, P_HEAD, P_DOWN, P_UP, P_COMP;
+const NEB_FS = `#version 300 es
+precision highp float;
+uniform vec2 uRes, uCam;
+uniform vec3 uTint;
+uniform float uTime, uNebula;
+in vec2 vUv; out vec4 o;
+float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + 1.0), f.x), f.y);
+}
+float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * noise(p); p = p * 2.03 + 17.1; a *= 0.5; } return v; }
+void main() {
+  vec2 p = (vUv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
+  vec2 np = p * 1.4 + uCam * 0.08;
+  float n = fbm(np + vec2(uTime * 0.012, -uTime * 0.007));
+  float n2 = fbm(np * 2.2 - vec2(uTime * 0.009, 0.0) + n * 1.7);
+  o = vec4(uTint * pow(n2, 3.2) * 0.05 * uNebula * smoothstep(1.2, 0.05, length(p)), 1.0);
+}`;
+
+let P_NEB, P_LINE, P_HEAD, P_DOWN, P_UP, P_COMP;
 try {
   P_LINE = program(LINE_VS, LINE_FS);
   P_HEAD = program(HEAD_VS, HEAD_FS);
   P_DOWN = program(QUAD_VS, DOWN_FS);
   P_UP   = program(QUAD_VS, UP_FS);
   P_COMP = program(QUAD_VS, COMP_FS);
+  P_NEB  = program(QUAD_VS, NEB_FS);
 } catch (e) { fail('Erreur de shader : ' + e.message); console.error(e); return; }
 
 const vao = gl.createVertexArray();
@@ -266,6 +283,7 @@ function makeTarget(w, h) {
 }
 function freeTarget(r) { if (r) { gl.deleteTexture(r.t); gl.deleteFramebuffer(r.fb); } }
 
+let neb = null, nebAge = 1e9;
 let W = 0, H = 0, scene = null, ms = null, levels = [];
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -273,7 +291,8 @@ function resize() {
   if (w === W && h === H) return;
   W = canvas.width = w; H = canvas.height = h;
 
-  freeTarget(scene); levels.forEach(freeTarget);
+  freeTarget(scene); freeTarget(neb); levels.forEach(freeTarget);
+  neb = makeTarget(Math.max(1, W >> 2), Math.max(1, H >> 2)); nebAge = 1e9;
   if (ms) { gl.deleteRenderbuffer(ms.rb); gl.deleteFramebuffer(ms.fb); ms = null; }
 
   scene = makeTarget(W, H);
@@ -296,14 +315,15 @@ function resize() {
 }
 
 /* ---------------------------- Simulation ---------------------------- */
-const SIG = 10, RHO = 28, BET = 8 / 3, SUB = 3, TICK = 1 / 60;
+let SIG = 10, RHO = 28;
+const BET = 8 / 3, SUB = 3, TICK = 1 / 60;
 let N = 0, L = 0, pos, col, histTex = null, head = 0, filled = 0;
 
 function lorenzStep(x, y, z, h, out) {
   let dx = SIG * (y - x), dy = x * (RHO - z) - y, dz = x * y - BET * z;
   const mx = x + dx * h * 0.5, my = y + dy * h * 0.5, mz = z + dz * h * 0.5;
   dx = SIG * (my - mx); dy = mx * (RHO - mz) - my; dz = mx * my - BET * mz;
-  out[0] = x + dx * h; out[1] = y + dy * h; out[2] = z + dz * h; out[3] = Math.hypot(dx, dy, dz);
+  out[0] = x + dx * h; out[1] = y + dy * h; out[2] = z + dz * h; out[3] = Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
 function alloc() {
@@ -402,7 +422,7 @@ if (window.wallpaperRegisterAudioListener) window.wallpaperRegisterAudioListener
 
 window.wallpaperPropertyListener = {
   applyUserProperties(p) {
-    const num = ['count', 'trail', 'speed', 'hueSpeed', 'spread', 'bloom', 'brightness', 'heads', 'autoRotate', 'mouseStrength', 'stars', 'nebula', 'audioGain'];
+    const num = ['count', 'trail', 'speed', 'hueSpeed', 'spread', 'bloom', 'brightness', 'heads', 'autoRotate', 'sway', 'morph', 'mouseStrength', 'stars', 'nebula', 'audioGain'];
     let realloc = false, pal = false;
     for (const k of num) if (p[k]) { const v = +p[k].value; if (k === 'count' || k === 'trail') realloc ||= v !== cfg[k]; cfg[k] = v; }
     for (const k of ['mouse', 'audio', 'ribbon']) if (p[k]) { if (k === 'ribbon') realloc ||= !!p[k].value !== cfg.ribbon; cfg[k] = !!p[k].value; }
@@ -418,12 +438,25 @@ window.wallpaperPropertyListener = {
 function bindCommon(u, cam) {
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, histTex); gl.uniform1i(u.uHist, 0);
   gl.uniform1i(u.uL, L); gl.uniform1i(u.uHead, head); gl.uniform1i(u.uFilled, filled);
-  gl.uniform1f(u.uN, N);
-  gl.uniform1f(u.uYaw, cam.yaw); gl.uniform1f(u.uPitch, cam.pitch); gl.uniform1f(u.uDist, cam.dist);
+  gl.uniform1f(u.uN, N); gl.uniform1f(u.uZc, RHO - 3); gl.uniformMatrix3fv(u.uRot, false, cam.rot);
+  gl.uniform1f(u.uDist, cam.dist);
   gl.uniform1f(u.uFocal, cam.focal); gl.uniform1f(u.uAspect, W / H); gl.uniform1f(u.uScale, 1 / 24);
   gl.uniform1f(u.uTime, cam.t); gl.uniform1f(u.uHueSpeed, cfg.hueSpeed); gl.uniform1f(u.uSpread, cfg.spread);
   gl.uniform1f(u.uRainbow, cfg.palette === 0 ? 1 : 0);
   gl.uniform3fv(u.uPal, palRGB);
+}
+
+const rotBuf = new Float32Array(9);
+function rotation(yaw, pitch, roll) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch), cr = Math.cos(roll), sr = Math.sin(roll);
+  const basis = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  basis.forEach(([x, y, z], c) => {
+    [x, z] = [cy * x + sy * z, -sy * x + cy * z];
+    [y, z] = [cp * y - sp * z, sp * y + cp * z];
+    [x, y] = [cr * x - sr * y, sr * x + cr * y];
+    rotBuf[c * 3] = x; rotBuf[c * 3 + 1] = y; rotBuf[c * 3 + 2] = z;
+  });
+  return rotBuf;
 }
 
 function pass(prog, target, tex, texel) {
@@ -449,6 +482,9 @@ function frame(now) {
   bass += (bassT - bass) * (bassT > bass ? 0.5 : 0.08);
   bassT *= 0.9;
 
+  const T = t + t0;
+  SIG = 10 + Math.sin(T * 0.045 + 1) * 3 * cfg.morph;
+  RHO = 28 + Math.sin(T * 0.06) * 3.8 * cfg.morph;
   acc += dt;
   let n = 0;
   while (acc >= TICK && n < 4) { tick(1 + bass * 0.35); acc -= TICK; n++; }
@@ -462,11 +498,13 @@ function frame(now) {
   mx += (tx - mx) * k; my += (ty - my) * k;
   const cam = {
     t: t + t0,
-    yaw: yaw + mx * 1.1,
-    pitch: 0.22 + Math.sin((t + t0) * 0.05) * 0.12 + my * 0.55,
-    dist: 3.55 + Math.sin((t + t0) * 0.07) * 0.18 - bass * 0.12,
+    yaw: yaw + Math.sin(T * 0.11) * 0.5 * cfg.sway + mx * 1.1,
+    pitch: 0.22 + Math.sin(T * 0.13) * 0.32 * cfg.sway + my * 0.55,
+    dist: 3.6 + Math.sin(T * 0.09) * 0.45 * cfg.sway - bass * 0.2,
+    roll: Math.sin(T * 0.07) * 0.16 * cfg.sway,
     focal: 1 / Math.tan((38 * Math.PI / 180) / 2),
   };
+  cam.rot = rotation(cam.yaw, cam.pitch, cam.roll);
 
   // 1. scène (traînées 3D + têtes) en HDR, additive, MSAA si possible
   gl.bindFramebuffer(gl.FRAMEBUFFER, ms ? ms.fb : scene.fb);
@@ -499,13 +537,31 @@ function frame(now) {
   for (let i = levels.length - 1; i > 0; i--) pass(P_UP, levels[i - 1], levels[i].t, [1 / levels[i].w, 1 / levels[i].h]);
   gl.disable(gl.BLEND);
 
-  // 3. composition finale
+  // 3. nébuleuse basse résolution, recalculée seulement toutes les 3 images
+  if (++nebAge >= 3 && cfg.nebula > 0) {
+    nebAge = 0;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, neb.fb);
+    gl.viewport(0, 0, neb.w, neb.h);
+    gl.useProgram(P_NEB.p);
+    gl.uniform2f(P_NEB.u.uRes, W, H);
+    gl.uniform2f(P_NEB.u.uCam, cam.yaw, cam.pitch);
+    gl.uniform3fv(P_NEB.u.uTint, tint);
+    gl.uniform1f(P_NEB.u.uTime, cam.t);
+    gl.uniform1f(P_NEB.u.uNebula, cfg.nebula);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  } else if (cfg.nebula <= 0 && nebAge !== -1) {
+    nebAge = -1;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, neb.fb); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+
+  // 4. composition finale
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.viewport(0, 0, W, H);
   const u = P_COMP.u;
   gl.useProgram(P_COMP.p);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, scene.t); gl.uniform1i(u.uScene, 0);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, levels[0].t); gl.uniform1i(u.uBloom, 1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, neb.t); gl.uniform1i(u.uNeb, 2);
   gl.uniform2f(u.uRes, W, H);
   gl.uniform2f(u.uCam, cam.yaw, cam.pitch);
   gl.uniform3fv(u.uTint, tint);
@@ -513,7 +569,6 @@ function frame(now) {
   gl.uniform1f(u.uBloomI, 0.4 * cfg.bloom * (1 + bass * 1.2));
   gl.uniform1f(u.uExposure, 1.0);
   gl.uniform1f(u.uStars, cfg.stars);
-  gl.uniform1f(u.uNebula, cfg.nebula);
   gl.uniform1f(u.uPulse, bass);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
