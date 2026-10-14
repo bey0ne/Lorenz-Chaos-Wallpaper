@@ -229,6 +229,46 @@
 				"text": "Départ en ruban (comme l'original)",
 				"type": "bool",
 				"value": false
+			},
+			"quality": {
+				"order": 21,
+				"text": "Qualité",
+				"type": "combo",
+				"value": 0,
+				"options": [
+					{
+						"label": "Auto (baisse la résolution seulement si le PC rame)",
+						"value": 0
+					},
+					{
+						"label": "Toujours maximale",
+						"value": 1
+					}
+				]
+			},
+			"aa": {
+				"order": 22,
+				"text": "Anticrénelage",
+				"type": "combo",
+				"value": 1,
+				"options": [
+					{
+						"label": "Analytique (net et léger, recommandé)",
+						"value": 1
+					},
+					{
+						"label": "MSAA 4× (lourd)",
+						"value": 4
+					},
+					{
+						"label": "MSAA 2×",
+						"value": 2
+					},
+					{
+						"label": "Désactivé",
+						"value": 0
+					}
+				]
 			}
 		}
 	}

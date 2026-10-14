@@ -43,6 +43,8 @@ const cfg = {
   audioGain: 1.0,
   ribbon: false,       // départ en ruban serré (comme l'original) au lieu d'un attracteur déjà rempli
   fps: 0,
+  quality: 0,          // 0 auto (résolution réduite seulement si le GPU ne tient pas la cadence), 1 toujours pleine résolution
+  aa: 1,               // anticrénelage des traînées : 1 analytique (léger), 4 ou 2 MSAA, 0 aucun
 };
 
 const qs = new URLSearchParams(location.search);
@@ -58,7 +60,8 @@ const HDR = !!gl.getExtension('EXT_color_buffer_float');
 const IFMT = HDR ? gl.RGBA16F : gl.RGBA8;
 const ITYPE = HDR ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
 const MAX_TEX = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-const SAMPLES = Math.min(4, gl.getParameter(gl.MAX_SAMPLES) || 0);
+const MAX_SAMPLES = gl.getParameter(gl.MAX_SAMPLES) || 0;
+const samples = () => cfg.aa > 1 ? Math.min(cfg.aa | 0, MAX_SAMPLES) : 0;
 
 function shader(type, src) {
   const s = gl.createShader(type);
@@ -108,21 +111,28 @@ vec4 project(vec3 s, out float depth) {
 }
 // teinte cohérente dans l'espace (les zones gardent une couleur franche) + décalage par particule
 float hueAt(vec3 s, int p) { return s.x / 46.0 + s.z / 90.0 + float(p) / uN * uSpread * 0.18 + uTime * uHueSpeed; }
-vec4 fetch(int p, int k) { return texelFetch(uHist, ivec2((uHead - k + uL * 8) % uL, p), 0); }
+vec4 fetch(int p, int k) { return texelFetch(uHist, ivec2(p, (uHead - k + uL * 8) % uL), 0); }
 `;
 
 const LINE_VS = COMMON + `
 out vec3 vCol;
-uniform int uSub;
+out float vD;
+uniform int uSub, uRibbon;
+uniform vec2 uRes;
 void main() {
+  // une instance = une particule, dessinée d'un seul tenant : chaque point de la courbe est calculé une seule fois
   // chaque intervalle entre deux points d'historique est découpé en uSub morceaux (spline Catmull-Rom)
-  int seg = gl_VertexID >> 1;
-  int perP = (uL - 1) * uSub;
-  int p = seg / perP;
-  int r = seg % perP;
-  int kSeg = r / uSub;
-  if (kSeg + 1 >= uFilled) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); vCol = vec3(0.0); return; }
-  float u = float(r % uSub + (gl_VertexID & 1)) / float(uSub);
+  // uRibbon = 1 : ruban de 2 px avec couverture analytique (anticrénelage exact, sans MSAA)
+  int p = gl_InstanceID;
+  vD = 0.0;
+  if (uFilled < 2) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); vCol = vec3(0.0); return; }
+  int v = uRibbon == 1 ? gl_VertexID >> 1 : gl_VertexID;
+  float side = float(gl_VertexID & 1) * 2.0 - 1.0;
+  int vMax = (uFilled - 1) * uSub;
+  bool hidden = v > vMax;                 // au-delà de l'historique rempli : segment dégénéré et noir
+  v = min(v, vMax);
+  int kSeg = min(v / uSub, uFilled - 2);
+  float u = float(v - kSeg * uSub) / float(uSub);
   vec4 p0 = fetch(p, max(kSeg - 1, 0));
   vec4 p1 = fetch(p, kSeg);
   vec4 p2 = fetch(p, kSeg + 1);
@@ -130,17 +140,28 @@ void main() {
   float u2 = u * u, u3 = u2 * u;
   vec4 s = 0.5 * (2.0 * p1 + (p2 - p0) * u + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u2 + (3.0 * p1 - p0 - 3.0 * p2 + p3) * u3);
   float d; gl_Position = project(s.xyz, d);
+  if (uRibbon == 1 && !hidden) {
+    // direction de la courbe à l'écran (dérivée exacte de la spline), puis décalage perpendiculaire de 1 px
+    vec3 ds = 0.5 * ((p2 - p0).xyz + 2.0 * u * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3).xyz + 3.0 * u2 * (3.0 * p1 - p0 - 3.0 * p2 + p3).xyz);
+    float d2; vec4 q = project(s.xyz + ds * 0.05, d2);
+    vec2 dir = (q.xy / q.w - gl_Position.xy / gl_Position.w) * uRes;
+    float l = length(dir);
+    vec2 n = l > 1e-6 ? vec2(-dir.y, dir.x) / l : vec2(0.0, 1.0);
+    gl_Position.xy += n * side * (2.0 / uRes) * gl_Position.w;
+    vD = side;
+  }
   float age = (float(kSeg) + u) / float(uL - 1);
   float fade = pow(1.0 - age, 1.8);
   vec3 c = palette(hueAt(s.xyz, p) + age * 0.08);
   c = mix(c, vec3(1.0), smoothstep(150.0, 280.0, s.w) * 0.2);   // zones rapides = plus blanches
-  vCol = c * fade * mix(1.5, 0.3, d) * uIntensity;
+  vCol = hidden ? vec3(0.0) : c * fade * mix(1.5, 0.3, d) * uIntensity;
 }`;
 
 const LINE_FS = `#version 300 es
 precision highp float;
-in vec3 vCol; out vec4 o;
-void main() { o = vec4(vCol, 1.0); }`;
+in vec3 vCol; in float vD; out vec4 o;
+// couverture d'une ligne de 1 px filtrée par le pixel : triangle de demi-largeur 1 px, intégrale = 1
+void main() { o = vec4(vCol * max(0.0, 1.0 - abs(vD)), 1.0); }`;
 
 const HEAD_VS = COMMON + `
 uniform float uHeadSize, uHeadI;
@@ -168,9 +189,9 @@ out vec2 vUv;
 void main() { vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); vUv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }`;
 
 const DOWN_FS = `#version 300 es
-precision highp float;
-uniform sampler2D uTex; uniform vec2 uTexel;
-in vec2 vUv; out vec4 o;
+precision mediump float;
+uniform mediump sampler2D uTex; uniform highp vec2 uTexel;
+in highp vec2 vUv; out vec4 o;
 void main() {
   vec3 s = texture(uTex, vUv).rgb * 4.0;
   s += texture(uTex, vUv - uTexel).rgb;
@@ -181,11 +202,11 @@ void main() {
 }`;
 
 const UP_FS = `#version 300 es
-precision highp float;
-uniform sampler2D uTex; uniform vec2 uTexel;
-in vec2 vUv; out vec4 o;
+precision mediump float;
+uniform mediump sampler2D uTex; uniform highp vec2 uTexel;
+in highp vec2 vUv; out vec4 o;
 void main() {
-  vec2 t = uTexel;
+  highp vec2 t = uTexel;
   vec3 s = texture(uTex, vUv + vec2(-2.0 * t.x, 0.0)).rgb;
   s += texture(uTex, vUv + vec2( 2.0 * t.x, 0.0)).rgb;
   s += texture(uTex, vUv + vec2(0.0, -2.0 * t.y)).rgb;
@@ -328,19 +349,22 @@ function makeTarget(w, h) {
 }
 function freeTarget(r) { if (r) { gl.deleteTexture(r.t); gl.deleteFramebuffer(r.fb); } }
 
-let neb = null, nebAge = 1e9;
+let neb = null, nebAge = 1e9, nebClear = false;
 let W = 0, H = 0, scene = null, ms = null, levels = [];
+let renderScale = 1, msaaNow = -1;
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2) * renderScale;
   const w = Math.max(1, Math.round(innerWidth * dpr)), h = Math.max(1, Math.round(innerHeight * dpr));
-  if (w === W && h === H) return;
+  if (w === W && h === H && msaaNow === samples()) return;
+  msaaNow = samples();
   W = canvas.width = w; H = canvas.height = h;
 
   freeTarget(scene); freeTarget(neb); levels.forEach(freeTarget);
-  neb = makeTarget(Math.max(1, W >> 2), Math.max(1, H >> 2)); nebAge = 1e9;
+  neb = makeTarget(Math.max(1, W >> 2), Math.max(1, H >> 2)); nebAge = 1e9; nebClear = false;
   if (ms) { gl.deleteRenderbuffer(ms.rb); gl.deleteFramebuffer(ms.fb); ms = null; }
 
   scene = makeTarget(W, H);
+  const SAMPLES = samples();
   if (SAMPLES > 1) {
     const rb = gl.createRenderbuffer();
     gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
@@ -391,7 +415,7 @@ function alloc() {
     }
   }
   if (histTex) gl.deleteTexture(histTex);
-  histTex = makeTex(L, N, gl.RGBA32F, gl.RGBA, gl.FLOAT, gl.NEAREST);
+  histTex = makeTex(N, L, gl.RGBA32F, gl.RGBA, gl.FLOAT, gl.NEAREST);   // une ligne par instant : mise à jour contiguë
   head = 0; filled = 0;
 }
 
@@ -409,7 +433,7 @@ function tick(boost) {
   head = (head + 1) % L;
   filled = Math.min(filled + 1, L);
   gl.bindTexture(gl.TEXTURE_2D, histTex);
-  gl.texSubImage2D(gl.TEXTURE_2D, 0, head, 0, 1, N, gl.RGBA, gl.FLOAT, col);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, head, N, 1, gl.RGBA, gl.FLOAT, col);
 }
 
 /* ------------------------------ Palettes ------------------------------ */
@@ -474,13 +498,24 @@ window.wallpaperPropertyListener = {
     let realloc = false, pal = false;
     for (const k of num) if (p[k]) { const v = +p[k].value; if (k === 'count' || k === 'trail') realloc ||= v !== cfg[k]; cfg[k] = v; }
     for (const k of ['mouse', 'audio', 'ribbon']) if (p[k]) { if (k === 'ribbon') realloc ||= !!p[k].value !== cfg.ribbon; cfg[k] = !!p[k].value; }
+    if (p.quality) { cfg.quality = +p.quality.value; if (cfg.quality === 1 && renderScale !== 1) { renderScale = 1; resize(); } }
+    if (p.aa) { cfg.aa = +p.aa.value; if (W) resize(); }
     if (p.palette) { cfg.palette = +p.palette.value; pal = true; }
     if (p.schemecolor) { cfg.custom = p.schemecolor.value.split(' ').map(Number); pal = true; }
     if (pal) updatePalette();
     if (realloc) alloc();
   },
   applyGeneralProperties(p) { if (p.fps !== undefined) cfg.fps = +p.fps; },
+  setPaused(v) { setPause(!!v); },
 };
+let paused = false, rafId = 0;
+function setPause(v) {
+  if (v === paused) return;
+  paused = v;
+  if (paused) { cancelAnimationFrame(rafId); rafId = 0; }
+  else if (!rafId) { prev = lastDraw = performance.now(); rafId = requestAnimationFrame(frame); }
+}
+document.addEventListener('visibilitychange', () => setPause(document.hidden));
 
 /* ------------------------------- Rendu ------------------------------- */
 function bindCommon(u, cam) {
@@ -519,13 +554,36 @@ function pass(prog, target, tex, texel) {
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
-let t = 0, yaw = 0.6, acc = 0, prev = performance.now(), lastDraw = 0;
+let t = 0, yaw = 0.6, acc = 0, prev = performance.now(), lastDraw = prev;
 const t0 = qs.has('t') ? +qs.get('t') : 0;
 
+/* Qualité auto : on ne baisse la résolution que si le GPU ne tient plus la cadence demandée,
+   et on la remonte dès qu'il a de la marge. Quand tout va bien, rendu identique. */
+let avgIv = 0, minIv = 1e9, slowT = 0, fastT = 0, upBlockT = 0;
+function adapt(iv) {
+  if (iv <= 0 || iv > 250) return;                                 // reprise après pause : on ignore
+  minIv = Math.min(minIv * 1.002, Math.max(iv, 4));                // période de l'écran (estimée)
+  avgIv = avgIv ? avgIv + (iv - avgIv) * 0.1 : iv;
+  if (cfg.quality !== 0) return;
+  const target = Math.max(cfg.fps > 0 ? 1000 / cfg.fps : 0, minIv);
+  const s = iv / 1000;
+  upBlockT = Math.max(0, upBlockT - s);
+  if (avgIv > target * 1.25) { slowT += s; fastT = 0; } else if (avgIv < target * 1.08) { fastT += s; slowT = 0; } else { slowT = fastT = 0; }
+  if (slowT > 1.5 && renderScale > 0.6) {
+    renderScale = Math.max(0.6, renderScale * 0.85); slowT = 0; upBlockT = 20; resize();
+  } else if (fastT > 6 && renderScale < 1 && upBlockT <= 0) {
+    renderScale = Math.min(1, renderScale / 0.85); fastT = 0; upBlockT = 10; resize();
+  }
+}
+
 function frame(now) {
-  requestAnimationFrame(frame);
-  if (cfg.fps > 0 && now - lastDraw < 1000 / cfg.fps - 2) return;
-  lastDraw = now;
+  rafId = requestAnimationFrame(frame);
+  if (cfg.fps > 0) {
+    const iv = 1000 / cfg.fps, el = now - lastDraw;
+    if (el < iv - 1) return;
+    lastDraw = el > iv * 3 ? now : lastDraw + iv;   // cadence régulière, sans dérive
+  } else lastDraw = now;
+  adapt(now - prev);
   const dt = Math.min(0.1, (now - prev) / 1000); prev = now;
   t += dt;
 
@@ -568,7 +626,11 @@ function frame(now) {
   gl.uniform1f(P_LINE.u.uIntensity, intensity);
   const sub = Math.max(1, Math.min(8, cfg.smooth | 0));
   gl.uniform1i(P_LINE.u.uSub, sub);
-  gl.drawArrays(gl.LINES, 0, N * (L - 1) * sub * 2);
+  const ribbon = cfg.aa === 1;
+  gl.uniform1i(P_LINE.u.uRibbon, ribbon ? 1 : 0);
+  gl.uniform2f(P_LINE.u.uRes, W, H);
+  if (ribbon) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, ((L - 1) * sub + 1) * 2, N);
+  else gl.drawArraysInstanced(gl.LINE_STRIP, 0, (L - 1) * sub + 1, N);
 
   gl.useProgram(P_HEAD.p); bindCommon(P_HEAD.u, cam);
   gl.uniform1f(P_HEAD.u.uHeadSize, Math.max(2, H / 260));
@@ -579,6 +641,7 @@ function frame(now) {
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, ms.fb);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, scene.fb);
     gl.blitFramebuffer(0, 0, W, H, 0, 0, W, H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.invalidateFramebuffer(gl.READ_FRAMEBUFFER, [gl.COLOR_ATTACHMENT0]);
   }
 
   // 2. bloom (dual filter : descente puis remontée additive)
@@ -589,9 +652,10 @@ function frame(now) {
   for (let i = levels.length - 1; i > 0; i--) pass(P_UP, levels[i - 1], levels[i].t, [1 / levels[i].w, 1 / levels[i].h]);
   gl.disable(gl.BLEND);
 
-  // 3. nébuleuse basse résolution, recalculée seulement toutes les 3 images
-  if (++nebAge >= 3 && cfg.nebula > 0) {
-    nebAge = 0;
+  // 3. nébuleuse basse résolution, recalculée ~20 fois par seconde (elle évolue très lentement)
+  nebAge += dt;
+  if (nebAge >= 0.05 && cfg.nebula > 0) {
+    nebAge = 0; nebClear = false;
     gl.bindFramebuffer(gl.FRAMEBUFFER, neb.fb);
     gl.viewport(0, 0, neb.w, neb.h);
     gl.useProgram(P_NEB.p);
@@ -602,8 +666,8 @@ function frame(now) {
     gl.uniform1f(P_NEB.u.uTime, cam.t);
     gl.uniform1f(P_NEB.u.uNebula, cfg.nebula);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-  } else if (cfg.nebula <= 0 && nebAge !== -1) {
-    nebAge = -1;
+  } else if (cfg.nebula <= 0 && !nebClear) {
+    nebClear = true;
     gl.bindFramebuffer(gl.FRAMEBUFFER, neb.fb); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
   }
 
@@ -630,7 +694,7 @@ updatePalette();
 resize();
 alloc();
 for (let i = +(qs.get('warm') || 0); i > 0; i--) tick(1);
-requestAnimationFrame(frame);
+rafId = requestAnimationFrame(frame);
 })();
 </script>
 </body>

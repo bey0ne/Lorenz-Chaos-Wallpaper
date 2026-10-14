@@ -18,8 +18,18 @@ verticalement pour l'incliner (vue de dessus, de profil, par la tranche). Pour �
 
 Tous modifiables dans le panneau du fond d'écran : palette (Spectre, Néon, Aurore, Braise, Glacier,
 Or, couleur du thème), nombre de particules, longueur des traînées, vitesse, luminosité, halo,
-lissage des courbes, rotation automatique, balancement de la caméra et respiration de la forme
+lissage des courbes, qualité (auto / maximale), anticrénelage (analytique / MSAA), rotation automatique, balancement de la caméra et respiration de la forme
 (désactivés par défaut), souris, étoiles, nébuleuse, sensibilité audio, départ en ruban.
 
 Dans un navigateur, les mêmes réglages passent en paramètres d'URL, par ex.
 `index.html?palette=3&count=1500&trail=250`.
+
+## Performances
+
+Mesuré sur Intel Iris Xe en 1920×1200 : **7 ms par image** contre 38,6 ms pour la première version, à rendu identique.
+
+- Anticrénelage analytique : chaque traînée est un ruban de 2 px dont la couverture est calculée dans le shader, sans MSAA sur le buffer HDR.
+- Une seule passe instanciée par traînée : chaque point de la spline n'est calculé qu'une fois.
+- Historique des positions mis à jour par ligne contiguë.
+- Limite d'images/s de Wallpaper Engine respectée sans dérive, pause automatique.
+- Qualité auto : la résolution ne baisse que si la cadence demandée n'est plus tenue.
