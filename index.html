@@ -26,6 +26,8 @@ const cfg = {
   speed: 0.8,          // vitesse de simulation
   palette: 0,          // 0 spectre, 1 néon, 2 aurore, 3 braise, 4 glacier, 5 or, 6 perso
   custom: [0.48, 0.18, 1.0],
+  skyPalette: 0,       // couleurs du ciel : 0 comme les traînées, 1 à 9 palettes du ciel, 10 couleur choisie
+  skyCustom: [0.25, 0.55, 1.0],
   hueSpeed: 0.05,      // défilement des couleurs
   spread: 1.0,         // étalement de la palette entre particules
   bloom: 1.0,
@@ -66,8 +68,10 @@ const cfg = {
 const qs = new URLSearchParams(location.search);
 const has = k => Object.prototype.hasOwnProperty.call(cfg, k) && typeof cfg[k] !== 'object';
 for (const [k, v] of qs) if (has(k)) cfg[k] = typeof cfg[k] === 'boolean' ? v === '1' || v === 'true' : +v;
-const hexQ = qs.get('color') || '';                     // couleur perso (palette 6) : color=7a2eff
-if (/^[0-9a-f]{6}$/i.test(hexQ)) cfg.custom = [0, 2, 4].map(i => parseInt(hexQ.slice(i, i + 2), 16) / 255);
+const fromHex = h => [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255);
+const hexQ = qs.get('color') || '', skyQ = qs.get('skycolor') || '';   // couleurs perso : color=7a2eff, skycolor=3f8cff
+if (/^[0-9a-f]{6}$/i.test(hexQ)) cfg.custom = fromHex(hexQ);
+if (/^[0-9a-f]{6}$/i.test(skyQ)) cfg.skyCustom = fromHex(skyQ);
 
 // Wallpaper Engine injecte ses fonctions avant le chargement de la page
 const IN_WE = typeof window.wallpaperRegisterAudioListener === 'function';
@@ -418,7 +422,7 @@ const SKY_FS = `#version 300 es
 precision highp float;
 uniform vec2 uExt, uNebA, uNebB;
 uniform vec3 uTint, uTint2;
-uniform float uTime, uNebula;
+uniform float uTime, uNebula, uMono;
 in vec2 vUv; out vec4 o;
 float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float noise(vec2 p) {
@@ -485,6 +489,7 @@ void main() {
   col += neb * (1.0 - absorb * 0.8) * (1.0 - globules * 0.55 * eb);
   col += sat(mix(uTint, uTint2, 0.5)) * exp(-dot(p, p) * 4.0) * 0.0025;                // halo derrière l'attracteur
   // couleur stockée en racine carrée : assez de précision dans les noirs même sans texture flottante
+  col = mix(col, vec3(dot(col, vec3(0.3, 0.59, 0.11))), uMono);                       // ciel en noir et blanc
   o = vec4(sqrt(col * uNebula), clamp(light * 0.75, 0.0, 1.0));  // alpha : densité d'étoiles (forte dans les nuages de la bande)
 }`;
 
@@ -663,7 +668,20 @@ function rgb2hsl([r, g, b]) {
   const h = mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
   return [h / 6, s, l];
 }
-let palRGB = new Float32Array(12), tint = [0.5, 0.3, 1], tint2 = [0.9, 0.3, 0.6];
+// couleurs du ciel (nébuleuses, reste de supernova, teinte de la Voie lactée), indépendantes des traînées si on veut
+const SKY_PALETTES = [
+  null,                                                   // comme les traînées
+  ['#2e8cff', '#ff2a4a'],                                 // Hubble : bleu et rouge
+  ['#00e5ff', '#ff2bd6'],                                 // néon
+  ['#00ffa3', '#8a5cff'],                                 // aurore
+  ['#ff8a00', '#ff2a00'],                                 // braise
+  ['#8fd8ff', '#7a6bff'],                                 // glacier
+  ['#ffcf5a', '#ff8a2e'],                                 // or
+  ['#b05cff', '#ff4fa8'],                                 // améthyste
+  ['#00e08a', '#00b8c8'],                                 // émeraude
+  ['#d4dae8', '#8e97ab'],                                 // noir et blanc
+];
+let palRGB = new Float32Array(12), tint = [0.5, 0.3, 1], tint2 = [0.9, 0.3, 0.6], skyTint = tint, skyTint2 = tint2, skyMono = 0;
 function updatePalette() {
   let stops;
   if (cfg.palette === 0) {
@@ -681,6 +699,13 @@ function updatePalette() {
     tint = [0, 1, 2].map(j => (stops[0][j] + stops[1][j]) * 0.5);
     tint2 = [0, 1, 2].map(j => (stops[2][j] + stops[3][j]) * 0.5);
   }
+  const sp = cfg.skyPalette | 0;
+  skyMono = sp === 9 ? 1 : 0;
+  if (sp >= 1 && sp < SKY_PALETTES.length) [skyTint, skyTint2] = SKY_PALETTES[sp].map(hex);
+  else if (sp === SKY_PALETTES.length) {                   // couleur choisie : elle et une voisine un peu plus rouge
+    const [h, s] = rgb2hsl(cfg.skyCustom), sat = Math.max(0.6, s);
+    skyTint = hsl2rgb(h, sat, 0.55); skyTint2 = hsl2rgb((h + 0.9) % 1, sat, 0.5);
+  } else { skyTint = tint; skyTint2 = tint2; }
   skyFull = true;                                          // le ciel reprend tout de suite les nouvelles couleurs
 }
 
@@ -721,6 +746,8 @@ window.wallpaperPropertyListener = {
     if (p.aa) { cfg.aa = +p.aa.value; if (W) resize(); }
     if (p.palette) { cfg.palette = +p.palette.value; pal = true; }
     if (p.schemecolor) { cfg.custom = p.schemecolor.value.split(' ').map(Number); pal = true; }
+    if (p.skyPalette) { cfg.skyPalette = +p.skyPalette.value; pal = true; }
+    if (p.skycolor) { cfg.skyCustom = String(p.skycolor.value).split(' ').map(Number); pal = true; }
     if (pal) updatePalette();
     if (realloc) alloc();
   },
@@ -946,7 +973,7 @@ addEventListener('message', e => {
   if (d.lorenzProps && typeof d.lorenzProps === 'object') window.wallpaperPropertyListener.applyUserProperties(d.lorenzProps);
   if (MOBILE && Array.isArray(d.lorenzPhone) && Object.prototype.hasOwnProperty.call(phone, d.lorenzPhone[0])) phone[d.lorenzPhone[0]](...d.lorenzPhone.slice(1));
 });
-if (DEBUG) window.__dbg = { PH, kick, cfg, phone, pos: () => pos, shown: () => col, N: () => N, tier: () => tierInfo, scale: () => renderScale, size: () => [W, H] };
+if (DEBUG) window.__dbg = { PH, kick, cfg, phone, pos: () => pos, shown: () => col, N: () => N, tier: () => tierInfo, scale: () => renderScale, size: () => [W, H], sky: () => [skyTint, skyTint2, skyMono] };
 
 function pass(prog, target, tex, texel) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, target.fb);
@@ -1098,8 +1125,9 @@ function draw(now) {
     gl.uniform2f(P_SKY.u.uExt, skyExt[0], skyExt[1]);
     gl.uniform2fv(P_SKY.u.uNebA, at(0.17, 0.8, 0.3, 0.88));
     gl.uniform2fv(P_SKY.u.uNebB, at(0.84, 0.2, 0.7, 0.12));
-    gl.uniform3fv(P_SKY.u.uTint, tint);
-    gl.uniform3fv(P_SKY.u.uTint2, tint2);
+    gl.uniform3fv(P_SKY.u.uTint, skyTint);
+    gl.uniform3fv(P_SKY.u.uTint2, skyTint2);
+    gl.uniform1f(P_SKY.u.uMono, skyMono);
     gl.uniform1f(P_SKY.u.uTime, cam.t);
     gl.uniform1f(P_SKY.u.uNebula, cfg.nebula);
     gl.enable(gl.SCISSOR_TEST);

@@ -54,8 +54,67 @@
 					}
 				]
 			},
-			"count": {
+			"skyPalette": {
 				"order": 2,
+				"text": "Couleurs du ciel",
+				"type": "combo",
+				"value": 0,
+				"options": [
+					{
+						"label": "Comme les traînées",
+						"value": 0
+					},
+					{
+						"label": "Hubble (bleu et rouge)",
+						"value": 1
+					},
+					{
+						"label": "Néon",
+						"value": 2
+					},
+					{
+						"label": "Aurore",
+						"value": 3
+					},
+					{
+						"label": "Braise",
+						"value": 4
+					},
+					{
+						"label": "Glacier",
+						"value": 5
+					},
+					{
+						"label": "Or",
+						"value": 6
+					},
+					{
+						"label": "Améthyste",
+						"value": 7
+					},
+					{
+						"label": "Émeraude",
+						"value": 8
+					},
+					{
+						"label": "Noir et blanc",
+						"value": 9
+					},
+					{
+						"label": "Couleur choisie",
+						"value": 10
+					}
+				]
+			},
+			"skycolor": {
+				"order": 3,
+				"text": "Couleur du ciel",
+				"type": "color",
+				"value": "0.25 0.55 1",
+				"condition": "skyPalette.value == 10"
+			},
+			"count": {
+				"order": 4,
 				"text": "Particules",
 				"type": "slider",
 				"min": 100,
@@ -64,7 +123,7 @@
 				"editable": true
 			},
 			"trail": {
-				"order": 3,
+				"order": 5,
 				"text": "Longueur des traînées",
 				"type": "slider",
 				"min": 20,
@@ -73,7 +132,7 @@
 				"editable": true
 			},
 			"smooth": {
-				"order": 4,
+				"order": 6,
 				"text": "Lissage des courbes",
 				"type": "slider",
 				"min": 1,
@@ -81,7 +140,7 @@
 				"value": 4
 			},
 			"speed": {
-				"order": 5,
+				"order": 7,
 				"text": "Vitesse des particules",
 				"type": "slider",
 				"fraction": true,
@@ -94,7 +153,7 @@
 				"text": "Vitesse différente au centre et sur les bords",
 				"type": "bool",
 				"value": true,
-				"order": 6
+				"order": 8
 			},
 			"spdIn": {
 				"text": "Vitesse au centre",
@@ -106,7 +165,7 @@
 				"fraction": true,
 				"value": 2.0,
 				"condition": "spdMode.value == true",
-				"order": 7
+				"order": 9
 			},
 			"spdOut": {
 				"text": "Vitesse sur les bords",
@@ -118,10 +177,10 @@
 				"fraction": true,
 				"value": 0.5,
 				"condition": "spdMode.value == true",
-				"order": 8
+				"order": 10
 			},
 			"brightness": {
-				"order": 9,
+				"order": 11,
 				"text": "Luminosité",
 				"type": "slider",
 				"fraction": true,
@@ -131,7 +190,7 @@
 				"value": 1
 			},
 			"bloom": {
-				"order": 10,
+				"order": 12,
 				"text": "Halo (bloom)",
 				"type": "slider",
 				"fraction": true,
@@ -141,7 +200,7 @@
 				"value": 1
 			},
 			"heads": {
-				"order": 11,
+				"order": 13,
 				"text": "Éclat des têtes",
 				"type": "slider",
 				"fraction": true,
@@ -151,7 +210,7 @@
 				"value": 1
 			},
 			"hueSpeed": {
-				"order": 12,
+				"order": 14,
 				"text": "Défilement des couleurs",
 				"type": "slider",
 				"fraction": true,
@@ -161,7 +220,7 @@
 				"value": 0.05
 			},
 			"spread": {
-				"order": 13,
+				"order": 15,
 				"text": "Étalement de la palette",
 				"type": "slider",
 				"fraction": true,
@@ -171,7 +230,7 @@
 				"value": 1
 			},
 			"autoRotate": {
-				"order": 14,
+				"order": 16,
 				"text": "Rotation automatique",
 				"type": "slider",
 				"fraction": true,
@@ -181,7 +240,7 @@
 				"value": 0
 			},
 			"sway": {
-				"order": 15,
+				"order": 17,
 				"text": "Balancement de la caméra",
 				"type": "slider",
 				"fraction": true,
@@ -191,7 +250,7 @@
 				"value": 0
 			},
 			"morph": {
-				"order": 16,
+				"order": 18,
 				"text": "Respiration de la forme",
 				"type": "slider",
 				"fraction": true,
@@ -201,13 +260,13 @@
 				"value": 0
 			},
 			"mouse": {
-				"order": 17,
+				"order": 19,
 				"text": "Suivre la souris",
 				"type": "bool",
 				"value": true
 			},
 			"mouseStrength": {
-				"order": 18,
+				"order": 20,
 				"text": "Amplitude souris",
 				"type": "slider",
 				"fraction": true,
@@ -218,7 +277,7 @@
 				"condition": "mouse.value == true"
 			},
 			"stars": {
-				"order": 19,
+				"order": 21,
 				"text": "Étoiles",
 				"type": "slider",
 				"fraction": true,
@@ -228,7 +287,7 @@
 				"value": 1
 			},
 			"nebula": {
-				"order": 20,
+				"order": 22,
 				"text": "Nébuleuse",
 				"type": "slider",
 				"fraction": true,
@@ -238,13 +297,13 @@
 				"value": 1
 			},
 			"audio": {
-				"order": 21,
+				"order": 23,
 				"text": "Réagir à l'audio",
 				"type": "bool",
 				"value": true
 			},
 			"audioGain": {
-				"order": 22,
+				"order": 24,
 				"text": "Sensibilité audio",
 				"type": "slider",
 				"fraction": true,
@@ -255,13 +314,13 @@
 				"condition": "audio.value == true"
 			},
 			"ribbon": {
-				"order": 23,
+				"order": 25,
 				"text": "Départ en ruban (comme l'original)",
 				"type": "bool",
 				"value": false
 			},
 			"quality": {
-				"order": 24,
+				"order": 26,
 				"text": "Qualité",
 				"type": "combo",
 				"value": 0,
@@ -277,7 +336,7 @@
 				]
 			},
 			"aa": {
-				"order": 25,
+				"order": 27,
 				"text": "Anticrénelage",
 				"type": "combo",
 				"value": 1,

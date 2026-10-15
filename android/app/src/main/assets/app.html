@@ -70,6 +70,7 @@
   .sub { color: var(--dim); font-size: 12.5px; margin-top: 6px; }
   .pals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 6px 0 4px; }
   .pal { border: 1px solid var(--line); background: rgba(255, 255, 255, .04); border-radius: 16px; padding: 10px 6px 8px; display: grid; justify-items: center; gap: 7px; font-size: 13px; }
+  .pal span { text-align: center; line-height: 1.2; }
   .pal i { width: 40px; height: 40px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15); }
   .pal[aria-pressed=true] { border-color: rgba(255, 255, 255, .55); background: rgba(255, 255, 255, .09); }
   .reset { width: 100%; margin-top: 18px; border: 1px solid var(--line); background: rgba(255, 255, 255, .04); border-radius: 14px; padding: 12px; color: var(--dim); }
@@ -118,15 +119,32 @@ const PALETTES = [
   ['Or', 'linear-gradient(135deg, #fff1c4, #ffcf5a 45%, #c9772b)'],
   ['Perso', ''],                                           // couleur choisie avec Teinte et Saturation
 ];
+// couleurs du ciel : mêmes choix que « Couleurs du ciel » dans Wallpaper Engine
+const SKYPALS = [
+  ['Comme les traînées', ''],                              // pastille : la palette des traînées
+  ['Hubble', 'linear-gradient(135deg, #2e8cff, #ff2a4a)'],
+  ['Néon', 'linear-gradient(135deg, #00e5ff, #ff2bd6)'],
+  ['Aurore', 'linear-gradient(135deg, #00ffa3, #8a5cff)'],
+  ['Braise', 'linear-gradient(135deg, #ff8a00, #ff2a00)'],
+  ['Glacier', 'linear-gradient(135deg, #8fd8ff, #7a6bff)'],
+  ['Or', 'linear-gradient(135deg, #ffcf5a, #ff8a2e)'],
+  ['Améthyste', 'linear-gradient(135deg, #b05cff, #ff4fa8)'],
+  ['Émeraude', 'linear-gradient(135deg, #00e08a, #00b8c8)'],
+  ['Noir et blanc', 'linear-gradient(135deg, #f2f4f8, #6b7385)'],
+  ['Perso', ''],                                           // couleur choisie avec Teinte du ciel et Saturation du ciel
+];
 const pct = v => Math.round(v * 100) + ' %';
 const pctOff = v => v === 0 ? 'aucun' : pct(v);
 const xN = n => v => '×' + v.toFixed(n);
 // mêmes réglages que dans Wallpaper Engine sur PC (mêmes noms, mêmes limites), plus ceux du téléphone
 const SECTIONS = [
   ['Couleurs', [
-    { k: 'palette', type: 'palette', def: 4 },
+    { k: 'palette', type: 'palette', label: 'Couleurs des traînées', def: 4 },
     { k: 'hue', label: 'Teinte', min: 0, max: 360, step: 1, def: 265, fmt: v => v + '°', when: v => v.palette === 6, cls: 'hue' },
     { k: 'sat', label: 'Saturation', min: 55, max: 100, step: 1, def: 100, fmt: v => v + ' %', when: v => v.palette === 6 },
+    { k: 'skyPalette', type: 'palette', list: SKYPALS, label: 'Couleurs du ciel', def: 0 },
+    { k: 'skyHue', label: 'Teinte du ciel', min: 0, max: 360, step: 1, def: 215, fmt: v => v + '°', when: v => v.skyPalette === 10, cls: 'hue' },
+    { k: 'skySat', label: 'Saturation du ciel', min: 55, max: 100, step: 1, def: 100, fmt: v => v + ' %', when: v => v.skyPalette === 10 },
     { k: 'hueSpeed', label: 'Défilement des couleurs', min: 0, max: 0.2, step: 0.005, def: 0.05, fmt: v => v === 0 ? 'arrêté' : v.toFixed(3) },
     { k: 'spread', label: 'Étalement de la palette', min: 0, max: 4, step: 0.05, def: 1, fmt: xN(2) },
   ]],
@@ -183,11 +201,14 @@ function hsl2rgb(h, s, l) {
   return [f(0), f(8), f(4)];
 }
 const customRGB = v => hsl2rgb(v.hue / 360, v.sat / 100, 0.55);
-const customHex = v => customRGB(v).map(c => Math.round(c * 255).toString(16).padStart(2, '0')).join('');
+const skyRGB = v => hsl2rgb(v.skyHue / 360, v.skySat / 100, 0.55);
+const toHex = rgb => rgb.map(c => Math.round(c * 255).toString(16).padStart(2, '0')).join('');
+const customHex = v => toHex(customRGB(v));
 const customCss = v => {
   const h = v.hue, s = v.sat;
   return `linear-gradient(135deg, hsl(${h} ${s * 0.5}% 85%), hsl(${h} ${s}% 55%) 45%, hsl(${(h + 340) % 360} ${s}% 45%))`;
 };
+const skyCss = v => `linear-gradient(135deg, hsl(${v.skyHue} ${v.skySat}% 55%), hsl(${(v.skyHue + 324) % 360} ${v.skySat}% 50%))`;
 
 // réglages enregistrés (appli) ou mémorisés par le navigateur (essais)
 function load() {
@@ -200,7 +221,7 @@ function load() {
 const val = load();
 let device = '';                                           // mémoire, cœurs, fréquence de l'écran, économie d'énergie
 try { device = A && A.device ? A.device() : ''; } catch (e) {}
-const query = () => ALL.map(c => c.k + '=' + val[c.k]).join('&') + '&color=' + customHex(val);
+const query = () => ALL.map(c => c.k + '=' + val[c.k]).join('&') + '&color=' + customHex(val) + '&skycolor=' + toHex(skyRGB(val));
 let saveT = 0;
 function save() {
   clearTimeout(saveT);
@@ -211,7 +232,8 @@ function save() {
 const frame = $('wp');
 frame.src = 'index.html?mobile=1' + (A ? '&native=1' : '') + (device ? '&' + device : '') + '&' + query() + (/[?&]debug\b/.test(location.search) ? '&debug=1' : '');
 const post = msg => { try { frame.contentWindow.postMessage(msg, '*'); } catch (e) {} };
-const push = k => post({ lorenzProps: k === 'hue' || k === 'sat' ? { schemecolor: { value: customRGB(val).join(' ') } } : { [k]: { value: val[k] } } });
+const push = k => post({ lorenzProps: k === 'hue' || k === 'sat' ? { schemecolor: { value: customRGB(val).join(' ') } }
+  : k === 'skyHue' || k === 'skySat' ? { skycolor: { value: skyRGB(val).join(' ') } } : { [k]: { value: val[k] } } });
 // capteurs envoyés par l'appli -> aperçu
 const fwd = name => (...a) => post({ lorenzPhone: [name, ...a] });
 window.__phone = { rot: fwd('rot'), shake: fwd('shake') };
@@ -224,8 +246,9 @@ for (const [title, list] of SECTIONS) {
   for (const c of list) {
     const row = document.createElement('div'); row.className = 'row'; box.appendChild(row);
     if (c.type === 'palette') {
+      if (c.label) { const l = document.createElement('div'); l.className = 'lab'; l.textContent = c.label; row.appendChild(l); }
       const g = document.createElement('div'); g.className = 'pals'; row.appendChild(g);
-      ui[c.k] = PALETTES.map(([name, css], i) => {
+      ui[c.k] = (c.list || PALETTES).map(([name, css], i) => {
         const b = document.createElement('button'); b.className = 'pal';
         b.innerHTML = '<i></i><span></span>'; b.firstChild.style.background = css; b.lastChild.textContent = name;
         b.onclick = () => set(c.k, i); g.appendChild(b); return b;
@@ -259,7 +282,10 @@ function render() {
     const v = val[c.k], u = ui[c.k];
     if (c.type === 'palette') {
       u.forEach((b, i) => b.setAttribute('aria-pressed', i === v));
-      u[6].firstChild.style.background = customCss(val);   // la pastille « Perso » montre la couleur choisie
+      if (c.list === SKYPALS) {                            // « Comme les traînées » et « Perso » montrent les couleurs en vigueur
+        u[0].firstChild.style.background = val.palette === 6 ? customCss(val) : PALETTES[val.palette][1];
+        u[10].firstChild.style.background = skyCss(val);
+      } else u[6].firstChild.style.background = customCss(val);   // la pastille « Perso » montre la couleur choisie
     }
     else if (c.type === 'bool') u.setAttribute('aria-checked', !!v);
     else if (c.type === 'choice') u.forEach(([x, b]) => b.setAttribute('aria-pressed', x === v));

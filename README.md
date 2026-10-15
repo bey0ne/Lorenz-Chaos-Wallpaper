@@ -22,7 +22,8 @@ verticalement pour l'incliner (vue de dessus, de profil, par la tranche). Sa fac
 ## Réglages
 
 Tous modifiables dans le panneau du fond d'écran : palette (Spectre, Néon, Aurore, Braise, Glacier,
-Or, couleur du thème), nombre de particules, longueur des traînées, vitesse, luminosité, halo,
+Or, couleur du thème), couleurs du ciel (comme les traînées, Hubble, Néon, Aurore, Braise, Glacier, Or,
+Améthyste, Émeraude, noir et blanc ou couleur choisie), nombre de particules, longueur des traînées, vitesse, luminosité, halo,
 lissage des courbes, qualité (auto / maximale), anticrénelage (analytique / MSAA), rotation automatique, balancement de la caméra et respiration de la forme
 (désactivés par défaut), souris, étoiles, nébuleuse, sensibilité audio, départ en ruban.
 
