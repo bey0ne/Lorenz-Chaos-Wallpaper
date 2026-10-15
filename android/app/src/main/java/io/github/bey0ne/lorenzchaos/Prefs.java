@@ -1,9 +1,16 @@
 package io.github.bey0ne.lorenzchaos;
 
+import android.app.ActivityManager;
 import android.app.WallpaperInfo;
 import android.app.WallpaperManager;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.hardware.display.DisplayManager;
+import android.os.Build;
+import android.os.PowerManager;
+import android.view.Display;
+
+import java.util.Locale;
 
 /**
  * Réglages de l'appli : une simple chaîne de requête (palette=4&count=600…) écrite par l'écran de
@@ -31,7 +38,68 @@ final class Prefs {
 
     static String wallpaperUrl(Context c) {
         String q = query(c);
-        return "file:///android_asset/index.html?mobile=1&native=1" + (q.isEmpty() ? "" : "&" + q);
+        return "file:///android_asset/index.html?mobile=1&native=1&" + device(c) + (q.isEmpty() ? "" : "&" + q);
+    }
+
+    /**
+     * Ce que la page ne peut pas savoir seule, pour choisir la qualité automatiquement : mémoire (Go), cœurs,
+     * fréquence de l'écran, mode économie d'énergie, téléphone à petite mémoire.
+     */
+    static String device(Context c) {
+        int ram = 0, hz = 60;
+        boolean lowRam = false, saver = false, hot = false;
+        try {
+            ActivityManager am = (ActivityManager) c.getSystemService(Context.ACTIVITY_SERVICE);
+            ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+            am.getMemoryInfo(mi);
+            ram = Math.round(mi.totalMem / 1073741824f);
+            lowRam = am.isLowRamDevice();
+        } catch (RuntimeException ignored) {
+            // valeur inconnue : la page se fie à sa puce graphique
+        }
+        try {
+            PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+            saver = pm != null && pm.isPowerSaveMode();
+            hot = pm != null && isHot(pm);
+        } catch (RuntimeException ignored) {
+            // idem
+        }
+        try {
+            DisplayManager dm = (DisplayManager) c.getSystemService(Context.DISPLAY_SERVICE);
+            Display d = dm.getDisplay(Display.DEFAULT_DISPLAY);
+            if (d != null) hz = Math.max(30, Math.round(d.getRefreshRate()));
+        } catch (RuntimeException ignored) {
+            // idem
+        }
+        return String.format(Locale.ROOT, "ram=%d&cores=%d&hz=%d&saver=%d&lowram=%d&heat=%d",
+                ram, Runtime.getRuntime().availableProcessors(), hz, saver ? 1 : 0, lowRam ? 1 : 0, hot ? 1 : 0);
+    }
+
+    /** Android 10+ : le téléphone commence à chauffer (le système réduit déjà ses performances). */
+    static boolean isHot(PowerManager pm) {
+        return Build.VERSION.SDK_INT >= 29 && pm.getCurrentThermalStatus() >= PowerManager.THERMAL_STATUS_MODERATE;
+    }
+
+    /** Valeur numérique d'un réglage enregistré (ou valeur par défaut). */
+    static float number(Context c, String key, float def) {
+        for (String kv : query(c).split("&")) {
+            if (kv.startsWith(key + "=")) {
+                try {
+                    return Float.parseFloat(kv.substring(key.length() + 1));
+                } catch (NumberFormatException ignored) {
+                    break;
+                }
+            }
+        }
+        return def;
+    }
+
+    static boolean tiltOn(Context c) {
+        return number(c, "tilt", 1) > 0;
+    }
+
+    static boolean shakeOn(Context c) {
+        return number(c, "shake", 1) > 0;
     }
 
     /** Notre fond d'écran est-il celui de l'écran d'accueil ? */

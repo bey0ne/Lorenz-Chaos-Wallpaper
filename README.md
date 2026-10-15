@@ -1,8 +1,13 @@
 # Lorenz Chaos — fond d'écran Wallpaper Engine
 
 Attracteur de Lorenz en 3D temps réel (WebGL 2) : ~900 trajectoires chaotiques avec traînées 3D,
-bloom HDR, aberration chromatique, nébuleuse et étoiles en fond, caméra en orbite lente,
-parallaxe souris et réaction à l'audio (les basses font pulser le halo).
+bloom HDR, aberration chromatique, caméra en orbite lente, parallaxe souris et réaction à l'audio
+(les basses font pulser le halo).
+
+En fond, un ciel profond calculé en direct : Voie lactée avec nuages d'étoiles et poussière sombre,
+reste de supernova en filaments, nébuleuse à émission aux couleurs de la palette, et des milliers
+d'étoiles nettes (couleurs selon leur température, quelques galaxies lointaines). Le ciel lointain est
+calculé à part, lentement, par bandes : il coûte très peu à chaque image.
 
 ## Installation
 
@@ -46,6 +51,15 @@ Une vraie appli de fond d'écran animé (dossier `android/`) qui affiche la mêm
 
 L'appli reprend tous les réglages de la version PC (sauf l'audio) et ajoute ceux du téléphone, avec un aperçu en direct.
 Elle ne demande aucune permission.
+
+**Qualité automatique** : le profil (Économe, Équilibrée, Élevée, Maximale) est choisi d'après la puce graphique
+(Adreno, Mali, Immortalis, Xclipse, PowerVR), la mémoire et le nombre de cœurs ; il baisse d'un cran tout seul si le
+téléphone n'arrive pas à suivre. On peut aussi choisir un profil ou tout régler à la main (Perso).
+
+**Batterie** : le fond ne tourne que lorsqu'il est visible ; 30 images par seconde au repos (24 en Économe), 60
+seulement pendant qu'on le touche ou qu'on bouge le téléphone ; capteurs lus ~30 fois par seconde et coupés si les
+réglages ne s'en servent pas ; sur les écrans 90–120 Hz, la page dort entre deux images. En économie d'énergie, ou
+quand le téléphone chauffe, il passe en Économe.
 
 L'APK est compilé par GitHub Actions (`.github/workflows/android.yml`) à chaque modification de `index.html`
 ou du dossier `android/`. La clé de signature `android/lorenz.keystore` est publique exprès : elle sert seulement

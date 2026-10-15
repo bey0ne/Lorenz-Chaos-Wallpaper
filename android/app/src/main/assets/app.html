@@ -64,6 +64,7 @@
   .seg { display: flex; gap: 6px; margin-top: 8px; }
   .seg button { flex: 1; border: 1px solid var(--line); background: rgba(255, 255, 255, .05); border-radius: 12px; padding: 9px 6px; font-size: 14px; }
   .seg button[aria-pressed=true] { background: rgba(111, 184, 255, .18); border-color: rgba(111, 184, 255, .55); }
+  .seg.grid { display: grid; grid-template-columns: repeat(3, 1fr); }
   .row[hidden] { display: none; }
   .hue input[type=range]::-webkit-slider-runnable-track { background: linear-gradient(90deg, #ff3b3b, #ffd83b, #3bff6e, #3bf0ff, #3b5bff, #c43bff, #ff3b3b); }
   .sub { color: var(--dim); font-size: 12.5px; margin-top: 6px; }
@@ -130,8 +131,8 @@ const SECTIONS = [
     { k: 'spread', label: 'Étalement de la palette', min: 0, max: 4, step: 0.05, def: 1, fmt: xN(2) },
   ]],
   ['Particules', [
-    { k: 'count', label: 'Particules', min: 100, max: 3000, step: 50, def: 600, fmt: String },
-    { k: 'trail', label: 'Longueur des traînées', min: 20, max: 400, step: 10, def: 150, fmt: String },
+    { k: 'count', label: 'Particules', min: 100, max: 3000, step: 50, def: 500, fmt: String },
+    { k: 'trail', label: 'Longueur des traînées', min: 20, max: 400, step: 10, def: 140, fmt: String },
     { k: 'smooth', label: 'Lissage des courbes', min: 1, max: 8, step: 1, def: 3, fmt: String },
     { k: 'heads', label: 'Éclat des têtes', min: 0, max: 3, step: 0.05, def: 1, fmt: pct },
     { k: 'ribbon', label: 'Départ en ruban (comme l\'original)', type: 'bool', def: 0 },
@@ -162,9 +163,13 @@ const SECTIONS = [
     { k: 'recenter', label: 'Retour à la vue de départ', min: 0, max: 30, step: 1, def: 8, fmt: v => v === 0 ? 'jamais' : 'après ' + v + ' s' },
   ]],
   ['Performances', [
-    { k: 'fps', label: 'Images par seconde', type: 'choice', def: 30, options: [[30, '30 · économe'], [60, '60 · fluide']] },
-    { k: 'quality', label: 'Qualité', type: 'choice', def: 0, options: [[0, 'Auto'], [1, 'Toujours maximale']],
-      sub: 'Auto : la résolution baisse seulement si le téléphone n\'arrive pas à suivre.' },
+    { k: 'profile', label: 'Qualité', type: 'choice', def: 0, grid: true, sub: ' ',
+      options: [[0, 'Auto'], [1, 'Économe'], [2, 'Équilibrée'], [3, 'Élevée'], [4, 'Maximale'], [5, 'Perso']] },
+    { k: 'fps', label: 'Images par seconde au repos', type: 'choice', def: 30, options: [[24, '24'], [30, '30'], [60, '60']],
+      sub: 'Moins il y en a, moins la batterie s\'use.' },
+    { k: 'boost', label: 'Plus fluide quand on le touche ou qu\'on bouge le téléphone', type: 'bool', def: 1 },
+    { k: 'quality', label: 'Résolution', type: 'choice', def: 0, options: [[0, 'Adaptée'], [1, 'Toujours maximale']],
+      sub: 'Adaptée : elle baisse seulement si le téléphone n\'arrive pas à suivre.' },
     { k: 'aa', label: 'Anticrénelage', type: 'choice', def: 1, options: [[1, 'Analytique'], [4, 'MSAA 4×'], [2, 'MSAA 2×'], [0, 'Aucun']],
       sub: 'Analytique : net et léger, recommandé. MSAA : plus lourd.' },
   ]],
@@ -193,6 +198,8 @@ function load() {
   return v;
 }
 const val = load();
+let device = '';                                           // mémoire, cœurs, fréquence de l'écran, économie d'énergie
+try { device = A && A.device ? A.device() : ''; } catch (e) {}
 const query = () => ALL.map(c => c.k + '=' + val[c.k]).join('&') + '&color=' + customHex(val);
 let saveT = 0;
 function save() {
@@ -202,7 +209,7 @@ function save() {
 
 // aperçu : la vraie page du fond d'écran, pilotée par messages
 const frame = $('wp');
-frame.src = 'index.html?mobile=1' + (A ? '&native=1' : '') + '&' + query() + (/[?&]debug\b/.test(location.search) ? '&debug=1' : '');
+frame.src = 'index.html?mobile=1' + (A ? '&native=1' : '') + (device ? '&' + device : '') + '&' + query() + (/[?&]debug\b/.test(location.search) ? '&debug=1' : '');
 const post = msg => { try { frame.contentWindow.postMessage(msg, '*'); } catch (e) {} };
 const push = k => post({ lorenzProps: k === 'hue' || k === 'sat' ? { schemecolor: { value: customRGB(val).join(' ') } } : { [k]: { value: val[k] } } });
 // capteurs envoyés par l'appli -> aperçu
@@ -229,13 +236,13 @@ for (const [title, list] of SECTIONS) {
       const t = row.querySelector('.tog'); t.setAttribute('aria-label', c.label);
       t.onclick = () => set(c.k, val[c.k] ? 0 : 1); ui[c.k] = t;
     } else if (c.type === 'choice') {
-      row.innerHTML = '<div class="lab"><span></span></div><div class="seg"></div>';
+      row.innerHTML = '<div class="lab"><span></span></div><div class="seg' + (c.grid ? ' grid' : '') + '"></div>';
       row.querySelector('span').textContent = c.label;
       ui[c.k] = c.options.map(([v, name]) => {
         const b = document.createElement('button'); b.textContent = name; b.onclick = () => set(c.k, v);
         row.querySelector('.seg').appendChild(b); return [v, b];
       });
-      if (c.sub) { const p = document.createElement('div'); p.className = 'sub'; p.textContent = c.sub; row.appendChild(p); }
+      if (c.sub) { const p = document.createElement('div'); p.className = 'sub'; p.textContent = c.sub; row.appendChild(p); c.subEl = p; }
     } else {
       row.innerHTML = '<div class="lab"><span></span><span class="val"></span></div><input type="range">';
       row.querySelector('span').textContent = c.label;
@@ -264,11 +271,38 @@ function render() {
     if (c.when) c.row.hidden = !c.when(val);           // comme les réglages conditionnels de Wallpaper Engine
   }
 }
+const PERF = ['count', 'trail', 'smooth', 'fps', 'quality', 'aa'];
 function set(k, v) {
   if (val[k] === v) return;
-  val[k] = v; render(); push(k); save();
+  if (PERF.includes(k) && val.profile !== 5) { val.profile = 5; push('profile'); }   // réglage à la main : profil « Perso »
+  val[k] = v; render(); describe(); push(k); save();
 }
-render();
+// ce que l'aperçu a détecté et appliqué (profil automatique ou choisi)
+const NAMES = ['', 'Économe', 'Équilibrée', 'Élevée', 'Maximale'];
+let detected = null;
+function describe() {
+  const c = ALL.find(x => x.k === 'profile');
+  if (!c.subEl) return;
+  const d = detected;
+  if (val.profile === 5) c.subEl.textContent = 'Tes propres réglages ci-dessous.';
+  else if (val.profile >= 1) c.subEl.textContent = 'Profil ' + NAMES[val.profile] + '. Modifier un réglage ci-dessous passe en Perso.';
+  else if (!d) c.subEl.textContent = 'Choisie selon ton téléphone.';
+  else {
+    const gpu = String(d.gpu || '').replace(/\((TM|R)\)/g, '').replace(/^ANGLE \(([^,]+), ([^,]+),.*$/, '$2').replace(/\s+/g, ' ').trim();
+    let t = 'Ton téléphone' + (gpu ? ' (' + gpu + (d.mem ? ', ' + d.mem + ' Go' : '') + ')' : '') + ' : ' + NAMES[d.tier] + '.';
+    if (d.why && d.why.length) t += ' Limitée par : ' + d.why.join(', ') + '.';
+    if (d.lowered) t += ' Abaissée à ' + NAMES[d.applied] + ' pour rester fluide.';
+    c.subEl.textContent = t;
+  }
+}
+addEventListener('message', e => {
+  const q = e.data && e.data.lorenzQuality;
+  if (!q || typeof q !== 'object') return;
+  detected = q;
+  if (val.profile !== 5 && q.values) for (const k of PERF) if (k in q.values) val[k] = +q.values[k];   // valeurs du profil
+  render(); describe();
+});
+render(); describe();
 
 // panneau des réglages
 const sheet = $('sheet'), dock = $('dock');

@@ -3,6 +3,10 @@ package io.github.bey0ne.lorenzchaos;
 import android.annotation.SuppressLint;
 import android.app.Presentation;
 import android.app.WallpaperColors;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
@@ -11,6 +15,7 @@ import android.hardware.display.VirtualDisplay;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.service.wallpaper.WallpaperService;
 import android.view.MotionEvent;
@@ -58,10 +63,23 @@ public class LorenzWallpaperService extends WallpaperService {
             if (pendingMove != null) { js(pendingMove); pendingMove = null; }
         };
         private final Runnable reload = () -> {
-            if (web != null) web.loadUrl(Prefs.wallpaperUrl(LorenzWallpaperService.this));
+            if (web == null) return;
+            web.loadUrl(Prefs.wallpaperUrl(LorenzWallpaperService.this));
+            sensors.stop();                                // les réglages ont pu couper l'inertie ou la secousse
+            if (isVisible()) startSensors();
         };
+        private Object thermal;                            // PowerManager.OnThermalStatusChangedListener (Android 10+)
+        private boolean hot;
         private final Runnable rebuild = () -> {
             if (holder != null && width > 0 && height > 0) build();
+        };
+        // mode économie d'énergie activé ou coupé : la qualité automatique s'adapte
+        private final BroadcastReceiver powerSave = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                handler.removeCallbacks(reload);
+                handler.postDelayed(reload, 400);
+            }
         };
 
         @Override
@@ -71,6 +89,27 @@ public class LorenzWallpaperService extends WallpaperService {
             setOffsetNotificationsEnabled(true);
             sensors = new PhoneSensors(LorenzWallpaperService.this, this::js);
             Prefs.get(LorenzWallpaperService.this).registerOnSharedPreferenceChangeListener(this);
+            IntentFilter saver = new IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED);
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(powerSave, saver, Context.RECEIVER_NOT_EXPORTED);
+            else registerReceiver(powerSave, saver);
+            // téléphone qui chauffe : on passe en économe (et on revient quand il a refroidi)
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (Build.VERSION.SDK_INT >= 29 && pm != null) {
+                hot = Prefs.isHot(pm);
+                PowerManager.OnThermalStatusChangedListener l = status -> {
+                    boolean h = status >= PowerManager.THERMAL_STATUS_MODERATE;
+                    if (h == hot) return;
+                    hot = h;
+                    handler.removeCallbacks(reload);
+                    handler.postDelayed(reload, 400);
+                };
+                pm.addThermalStatusListener(l);
+                thermal = l;
+            }
+        }
+
+        private void startSensors() {
+            sensors.start(Prefs.tiltOn(LorenzWallpaperService.this), Prefs.shakeOn(LorenzWallpaperService.this));
         }
 
         @Override
@@ -105,7 +144,7 @@ public class LorenzWallpaperService extends WallpaperService {
                 release();
                 return;
             }
-            if (isVisible()) sensors.start();
+            if (isVisible()) startSensors();
             else web.onPause();
         }
 
@@ -117,7 +156,7 @@ public class LorenzWallpaperService extends WallpaperService {
                 js("window.__phone&&__phone.pause(0)");
                 // retour sur l'écran d'accueil après un moment (déverrouillage, sortie d'une appli) : petit zoom d'entrée
                 if (hiddenAt != 0 && SystemClock.uptimeMillis() - hiddenAt > 3000) js("window.__phone&&__phone.wake()");
-                sensors.start();
+                startSensors();
             } else {
                 sensors.stop();
                 js("window.__phone&&__phone.pause(1)");
@@ -184,6 +223,16 @@ public class LorenzWallpaperService extends WallpaperService {
         @Override
         public void onDestroy() {
             Prefs.get(LorenzWallpaperService.this).unregisterOnSharedPreferenceChangeListener(this);
+            try {
+                unregisterReceiver(powerSave);
+            } catch (IllegalArgumentException ignored) {
+                // déjà retiré
+            }
+            if (Build.VERSION.SDK_INT >= 29 && thermal != null) {
+                PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+                if (pm != null) pm.removeThermalStatusListener((PowerManager.OnThermalStatusChangedListener) thermal);
+                thermal = null;
+            }
             handler.removeCallbacksAndMessages(null);
             release();
             super.onDestroy();

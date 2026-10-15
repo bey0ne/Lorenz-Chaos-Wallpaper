@@ -73,7 +73,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         web.onResume();
-        sensors.start();
+        sensors.start(true, true);                         // aperçu : capteurs prêts, les réglages changent en direct
         js("window.onAppResume&&onAppResume()");          // l'état « fond d'écran actif » a pu changer
     }
 
@@ -144,6 +144,11 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void save(String q) {
             Prefs.save(MainActivity.this, q);
+        }
+
+        @JavascriptInterface
+        public String device() {
+            return Prefs.device(MainActivity.this);
         }
 
         @JavascriptInterface
