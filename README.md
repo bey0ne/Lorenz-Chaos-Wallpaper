@@ -12,7 +12,7 @@ parallaxe souris et réaction à l'audio (les basses font pulser le halo).
 Autre méthode : Wallpaper Engine → *Ouvrir un fond d'écran* → *Ouvrir depuis un fichier* → `index.html`.
 
 La souris fait pivoter l'attracteur comme dans la version d'origine : horizontalement pour le tourner,
-verticalement pour l'incliner (vue de dessus, de profil, par la tranche). Pour ça, activer *Paramètres → Général → Interaction souris* dans Wallpaper Engine.
+verticalement pour l'incliner (vue de dessus, de profil, par la tranche). Sa face avant suit le curseur. Pour ça, activer *Paramètres → Général → Interaction souris* dans Wallpaper Engine.
 
 ## Réglages
 
@@ -33,3 +33,22 @@ Mesuré sur Intel Iris Xe en 1920×1200 : **7 ms par image** contre 38,6 ms pour
 - Historique des positions mis à jour par ligne contiguë.
 - Limite d'images/s de Wallpaper Engine respectée sans dérive, pause automatique.
 - Qualité auto : la résolution ne baisse que si la cadence demandée n'est plus tenue.
+
+## Version Android
+
+Une vraie appli de fond d'écran animé (dossier `android/`) qui affiche la même page `index.html` :
+
+- **doigt** : on fait tourner l'attracteur (sa face avant suit le doigt) ; lancé, il garde son élan puis ralentit,
+  et revient seul à sa vue de départ après quelques secondes ;
+- **gyroscope** : quand on tourne le téléphone, l'attracteur a de l'inertie, puis revient en place avec un léger rebond ;
+- **secousse** : les particules sont projetées, puis rappelées comme par un élastique ;
+- **écran d'accueil** : légère rotation quand on change de page, petit zoom au retour sur l'accueil.
+
+L'appli reprend tous les réglages de la version PC (sauf l'audio) et ajoute ceux du téléphone, avec un aperçu en direct.
+Elle ne demande aucune permission.
+
+L'APK est compilé par GitHub Actions (`.github/workflows/android.yml`) à chaque modification de `index.html`
+ou du dossier `android/`. La clé de signature `android/lorenz.keystore` est publique exprès : elle sert seulement
+à ce que chaque nouvelle version s'installe par-dessus la précédente.
+
+Pour essayer la version téléphone dans un navigateur : `index.html?mobile=1`.

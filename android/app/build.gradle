@@ -1,0 +1,57 @@
+plugins {
+    id 'com.android.application'
+}
+
+// La page du fond d'écran est la même que pour Wallpaper Engine sur PC (index.html à la racine du dépôt) :
+// on la recopie dans les fichiers de l'appli à chaque compilation.
+def page = rootProject.file('../index.html')
+if (page.exists()) {
+    def dst = file('src/main/assets/index.html')
+    dst.parentFile.mkdirs()
+    dst.bytes = page.bytes
+}
+
+android {
+    namespace 'io.github.bey0ne.lorenzchaos'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'io.github.bey0ne.lorenzchaos'
+        minSdk 26
+        targetSdk 36
+        // numéro de compilation GitHub : chaque nouvel APK s'installe par-dessus le précédent
+        def run = (System.getenv('GITHUB_RUN_NUMBER') ?: '1') as int
+        versionCode run
+        versionName "1.0.${run}"
+    }
+
+    signingConfigs {
+        // clé fixe (sans valeur secrète) : chaque nouvelle version s'installe par-dessus la précédente
+        lorenz {
+            storeFile rootProject.file('lorenz.keystore')
+            storePassword 'lorenzchaos'
+            keyAlias 'lorenz'
+            keyPassword 'lorenzchaos'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.lorenz
+        }
+        debug {
+            signingConfig signingConfigs.lorenz
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Lorenz Chaos</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #030307; overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: #030307; overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
   canvas { display: block; width: 100vw; height: 100vh; }
   #err { position: fixed; inset: 0; display: none; place-items: center; color: #8a86a6; font: 15px/1.5 system-ui, sans-serif; text-align: center; padding: 2em; }
 </style>
@@ -50,10 +50,30 @@ const cfg = {
   roll: -1,            // rotation de l'image (rad), -1 = auto : 90° sur écran vertical
   zoom: 0,             // recul de la caméra, 0 = auto (s'adapte aux écrans verticaux)
   aa: 1,               // anticrénelage des traînées : 1 analytique (léger), 4 ou 2 MSAA, 0 aucun
+  mobile: -1,          // -1 auto (écran tactile hors Wallpaper Engine), 0 version PC, 1 version téléphone
+  // version téléphone
+  touch: 1,            // sensibilité du doigt (0 = ignoré)
+  tilt: 1,             // force de l'inertie quand on tourne le téléphone (0 = gyroscope ignoré)
+  tiltInv: false,      // inertie inversée (l'attracteur tourne avec le téléphone, en plus)
+  shake: true,         // secouer le téléphone disperse les particules
+  recenter: 8,         // secondes sans toucher avant le retour à la vue de départ (0 = jamais)
+  pan: true,           // légère rotation quand on change de page sur l'écran d'accueil
+  native: false,       // capteurs fournis par l'appli Android (window.__phone) au lieu du navigateur
 };
 
 const qs = new URLSearchParams(location.search);
-for (const [k, v] of qs) if (k in cfg && typeof cfg[k] !== 'object') cfg[k] = typeof cfg[k] === 'boolean' ? v === '1' || v === 'true' : +v;
+const has = k => Object.prototype.hasOwnProperty.call(cfg, k) && typeof cfg[k] !== 'object';
+for (const [k, v] of qs) if (has(k)) cfg[k] = typeof cfg[k] === 'boolean' ? v === '1' || v === 'true' : +v;
+const hexQ = qs.get('color') || '';                     // couleur perso (palette 6) : color=7a2eff
+if (/^[0-9a-f]{6}$/i.test(hexQ)) cfg.custom = [0, 2, 4].map(i => parseInt(hexQ.slice(i, i + 2), 16) / 255);
+
+// Wallpaper Engine injecte ses fonctions avant le chargement de la page
+const IN_WE = typeof window.wallpaperRegisterAudioListener === 'function';
+const MOBILE = cfg.mobile === 1 || (cfg.mobile === -1 && !IN_WE && !!(window.matchMedia && matchMedia('(pointer: coarse)').matches));
+// réglages par défaut plus légers sur téléphone (batterie), sauf s'ils sont donnés dans l'adresse
+if (MOBILE) for (const [k, v] of Object.entries({ count: 600, trail: 150, smooth: 3, fps: 30, palette: 4 })) if (!qs.has(k)) cfg[k] = v;
+const DEBUG = qs.has('debug');
+let applyMobile = () => {};                            // remplacé par le module téléphone plus bas
 
 /* ---------------------------- WebGL setup ---------------------------- */
 const canvas = document.getElementById('c');
@@ -61,7 +81,17 @@ const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, depth: 
 const fail = msg => { const e = document.getElementById('err'); e.textContent = msg; e.style.display = 'grid'; };
 if (!gl) { fail('Ce fond d\'écran a besoin de WebGL 2.'); return; }
 
-const HDR = !!gl.getExtension('EXT_color_buffer_float');
+// cibles HDR (RGBA16F) : EXT_color_buffer_float sur PC, souvent seulement EXT_color_buffer_half_float sur téléphone
+const HDR = (!!gl.getExtension('EXT_color_buffer_float') || !!gl.getExtension('EXT_color_buffer_half_float')) && (() => {
+  const t = gl.createTexture(), fb = gl.createFramebuffer();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, 4, 4, 0, gl.RGBA, gl.HALF_FLOAT, null);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.deleteFramebuffer(fb); gl.deleteTexture(t);
+  return ok;
+})();
 const IFMT = HDR ? gl.RGBA16F : gl.RGBA8;
 const ITYPE = HDR ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
 const MAX_TEX = gl.getParameter(gl.MAX_TEXTURE_SIZE);
@@ -433,10 +463,23 @@ const stepOut = new Float64Array(4);
    Lorenz (les bords y sont naturellement ~5x plus rapides) pour que les curseurs donnent la vitesse visible. */
 const PROFIL = 1.68, VBASE = 2.0;
 const smooth01 = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+/* Secousse (version téléphone) : les particules sont écartées puis rappelées comme par un élastique, avec un
+   léger rebond. Seul l'affichage est décalé : la simulation, elle, reste exactement sur l'attracteur. */
+const kick = { t: 9, a: 0 };
+let kickDir = null;
+const KW = 2 * Math.PI * 1.1, KT = 0.25, KN = 0.4725;    // rebond à ~1 Hz amorti en ~0,25 s (KN : pic ramené à 1)
 function tick(boost) {
   const h = 0.0025 * cfg.speed * boost;
   const custom = cfg.spdMode;
   const lIn = Math.log(Math.max(0.05, cfg.spdIn)), lOut = Math.log(Math.max(0.05, cfg.spdOut));
+  const kickOn = kick.t < 1.6 && kickDir !== null && kickDir.length === N * 3;
+  let ka = 0, kv = 0;
+  if (kickOn) {
+    kick.t += TICK;
+    const e = Math.exp(-kick.t / KT), s = Math.sin(KW * kick.t);
+    ka = kick.a * e * s / KN;                                                    // écart
+    kv = Math.abs(kick.a * e * (KW * Math.cos(KW * kick.t) - s / KT) / KN);     // sa vitesse : les particules lancées brillent
+  }
   for (let i = 0; i < N; i++) {
     const j = i * 3;
     let x = pos[j], y = pos[j + 1], z = pos[j + 2], v = 0;
@@ -451,6 +494,7 @@ function tick(boost) {
     if (!isFinite(x + y + z)) { x = Math.random() - 0.5; y = 0; z = 20; }
     pos[j] = x; pos[j + 1] = y; pos[j + 2] = z;
     const k = i * 4; col[k] = x; col[k + 1] = y; col[k + 2] = z; col[k + 3] = v * w;   // vitesse apparente (éclat des zones rapides)
+    if (kickOn) { col[k] += kickDir[j] * ka; col[k + 1] += kickDir[j + 1] * ka; col[k + 2] += kickDir[j + 2] * ka; col[k + 3] += kv * 3; }
   }
   head = (head + 1) % L;
   filled = Math.min(filled + 1, L);
@@ -516,10 +560,11 @@ if (window.wallpaperRegisterAudioListener) window.wallpaperRegisterAudioListener
 
 window.wallpaperPropertyListener = {
   applyUserProperties(p) {
-    const num = ['spdIn', 'spdOut', 'count', 'trail', 'speed', 'hueSpeed', 'spread', 'bloom', 'brightness', 'heads', 'autoRotate', 'smooth', 'sway', 'morph', 'mouseStrength', 'stars', 'nebula', 'audioGain'];
+    const num = ['spdIn', 'spdOut', 'count', 'trail', 'speed', 'hueSpeed', 'spread', 'bloom', 'brightness', 'heads', 'autoRotate', 'smooth', 'sway', 'morph', 'mouseStrength', 'stars', 'nebula', 'audioGain',
+      'touch', 'tilt', 'recenter', 'fps'];                 // ces derniers ne viennent que de l'appli Android
     let realloc = false, pal = false;
     for (const k of num) if (p[k]) { const v = +p[k].value; if (k === 'count' || k === 'trail') realloc ||= v !== cfg[k]; cfg[k] = v; }
-    for (const k of ['spdMode', 'mouse', 'audio', 'ribbon']) if (p[k]) { if (k === 'ribbon') realloc ||= !!p[k].value !== cfg.ribbon; cfg[k] = !!p[k].value; }
+    for (const k of ['spdMode', 'mouse', 'audio', 'ribbon', 'tiltInv', 'shake', 'pan']) if (p[k]) { if (k === 'ribbon') realloc ||= !!p[k].value !== cfg.ribbon; cfg[k] = !!p[k].value; }
     if (p.quality) { cfg.quality = +p.quality.value; if (cfg.quality === 1 && renderScale !== 1) { renderScale = 1; resize(); } }
     if (p.aa) { cfg.aa = +p.aa.value; if (W) resize(); }
     if (p.palette) { cfg.palette = +p.palette.value; pal = true; }
@@ -565,6 +610,183 @@ function rotation(yaw, pitch, roll) {
   });
   return rotBuf;
 }
+
+/* -------------------------- Version téléphone -------------------------- *
+ * Doigt     : on attrape l'attracteur et on le fait tourner, sa face avant suit le doigt. Lancé, il garde
+ *             son élan puis ralentit (frottement), et revient seul à sa vue de départ après un moment.
+ * Gyroscope : l'attracteur a de l'inertie, comme un objet suspendu à un ressort dans le téléphone : quand
+ *             on tourne le téléphone, il reste un instant immobile dans l'espace, puis revient en place
+ *             avec un léger rebond.
+ * Secousse  : les particules sont projetées, puis l'attracteur les rattrape.
+ * Pages     : légère rotation quand on change de page sur l'écran d'accueil, petit zoom au retour.
+ * Dans l'appli Android, capteurs et doigt arrivent par window.__phone ; dans un navigateur, par les
+ * événements habituels (pointer*, devicemotion). Repère de l'écran : x à droite, y en haut, z vers soi. */
+const qMul = (a, b) => [
+  a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3],
+  a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2],
+  a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1],
+  a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0]];
+function qRot(x, y, z) {                                    // vecteur rotation (axe × angle) -> quaternion [w, x, y, z]
+  const a = Math.hypot(x, y, z);
+  if (a < 1e-9) return [1, x / 2, y / 2, z / 2];
+  const s = Math.sin(a / 2) / a;
+  return [Math.cos(a / 2), x * s, y * s, z * s];
+}
+function qLog(q) {                                          // quaternion -> vecteur rotation (angle <= pi)
+  const sg = q[0] < 0 ? -1 : 1, w = q[0] * sg, x = q[1] * sg, y = q[2] * sg, z = q[3] * sg;
+  const s = Math.hypot(x, y, z), f = s < 1e-9 ? 2 : 2 * Math.atan2(s, w) / s;
+  return [x * f, y * f, z * f];
+}
+const qNorm = q => { const n = Math.hypot(q[0], q[1], q[2], q[3]) || 1; return [q[0] / n, q[1] / n, q[2] / n, q[3] / n]; };
+const qConj = q => [q[0], -q[1], -q[2], -q[3]];
+const qPow = (q, f) => { const r = qLog(q); return qRot(r[0] * f, r[1] * f, r[2] * f); };
+
+const PH = {
+  qT: [1, 0, 0, 0], wv: [0, 0, 0], drag: null, idle: 1e9,  // doigt : rotation, élan (rad/s), geste en cours, temps sans toucher
+  r: [0, 0, 0], w: [0, 0, 0], gIn: [0, 0, 0],             // ressort du gyroscope : écart, vitesse, rotation reçue du téléphone
+  off: 0, offT: 0, off0: null,                            // pages de l'écran d'accueil
+  zoom: 0, zoomT: 0, wake: 0,                             // volet ou tiroir ouvert, retour sur l'écran d'accueil
+  sx: 0, sy: 0, qPrev: null,                              // décalage du ciel (parallaxe des étoiles)
+};
+const RM = new Float32Array(9);
+
+function touchStart(x, y, t) {
+  PH.drag = { x, y, last: t, vx: 0, vy: 0, off: PH.offT, paged: false };
+  PH.wv = [0, 0, 0]; PH.idle = 0;                         // poser le doigt arrête la rotation, comme sur un globe
+}
+function touchMove(x, y, t) {
+  const d = PH.drag; if (!d || !(cfg.touch > 0)) return;
+  const k = Math.PI * 0.6 * cfg.touch / Math.max(1, Math.min(innerWidth, innerHeight));   // un écran de large ≈ 110°
+  const ax = (y - d.y) * k, ay = (x - d.x) * k, dt = Math.max(0.004, (t - d.last) / 1000);
+  d.x = x; d.y = y; d.last = t; PH.idle = 0;
+  PH.qT = qNorm(qMul(qRot(ax, ay, 0), PH.qT));             // doigt vers la droite : rotation autour de l'axe vertical
+  const a = Math.min(1, dt / 0.05);                        // vitesse lissée sur ~50 ms, pour l'élan au lâcher
+  d.vx += (ax / dt - d.vx) * a; d.vy += (ay / dt - d.vy) * a;
+}
+function touchEnd(t) {
+  const d = PH.drag; if (!d) return;
+  PH.drag = null; PH.idle = 0;
+  if (t - d.last > 90 || d.paged || !(cfg.touch > 0)) return;   // doigt arrêté avant de lâcher, ou page changée : pas d'élan
+  const m = Math.hypot(d.vx, d.vy), f = m > 10 ? 10 / m : 1;
+  PH.wv = [d.vx * f, d.vy * f, 0];
+}
+function shake(m) {                                         // m : accélération du téléphone hors pesanteur (m/s²)
+  if (!cfg.shake || !(m > 12) || kick.t < 1 || !N) return;  // une secousse à la fois (la précédente doit être retombée)
+  const s = Math.min(1, Math.max(0.3, (m - 12) / 14)), zc = RHO - 3;
+  if (!kickDir || kickDir.length !== N * 3) kickDir = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    // vers l'extérieur depuis le centre de l'attracteur, avec une bonne part de hasard
+    const j = i * 3, x = pos[j], y = pos[j + 1], z = pos[j + 2] - zc, l = Math.hypot(x, y, z) || 1;
+    const dx = x / l + (Math.random() - 0.5) * 1.4, dy = y / l + (Math.random() - 0.5) * 1.4, dz = z / l + (Math.random() - 0.5) * 1.4;
+    const f = (0.4 + Math.random() * 1.2) / (Math.hypot(dx, dy, dz) || 1);
+    kickDir[j] = dx * f; kickDir[j + 1] = dy * f; kickDir[j + 2] = dz * f;
+  }
+  kick.a = 10 * s; kick.t = 0;                              // écart maximal ~10 (l'attracteur fait ~50 de haut)
+}
+
+const phone = {
+  rot(x, y, z) { PH.gIn[0] += +x || 0; PH.gIn[1] += +y || 0; PH.gIn[2] += +z || 0; },   // rotation du téléphone depuis l'appel précédent (rad)
+  shake(m) { shake(+m); },
+  touch(kind, x, y, t) { kind === 0 ? touchStart(+x, +y, +t) : kind === 1 ? touchMove(+x, +y, +t) : touchEnd(+t); },
+  offset(x) {                                              // position dans les pages de l'écran d'accueil (0 à 1)
+    x = +x; if (!isFinite(x)) return;
+    if (PH.off0 === null) PH.off0 = x;                     // la page de départ garde la vue de départ
+    const v = x - PH.off0;
+    if (PH.drag && Math.abs(v - PH.drag.off) > 0.01) PH.drag.paged = true;
+    PH.offT = v;
+  },
+  zoom(z) { PH.zoomT = Math.max(0, Math.min(1, +z || 0)); },
+  wake() { PH.wake = 1; },
+  pause(v) { setPause(!!v); },
+};
+
+applyMobile = (cam, dt) => {
+  if (dt > 0) {
+    PH.idle += dt;
+    // élan du doigt : frottement visqueux + frottement sec, la rotation finit par s'arrêter net
+    if (!PH.drag) {
+      const m = Math.hypot(PH.wv[0], PH.wv[1], PH.wv[2]);
+      if (m > 0) {
+        PH.qT = qNorm(qMul(qRot(PH.wv[0] * dt, PH.wv[1] * dt, PH.wv[2] * dt), PH.qT));
+        const f = Math.max(0, m * Math.exp(-dt / 0.9) - 0.35 * dt) / m;
+        PH.wv = PH.wv.map(v => v * f);
+        if (m > 0.05) PH.idle = 0;
+      }
+      if (cfg.recenter > 0 && PH.idle > cfg.recenter) PH.qT = qPow(PH.qT, Math.exp(-dt / 1.6));   // retour en douceur
+    }
+    // gyroscope : la rotation reçue est étalée sur ~40 ms (les capteurs n'arrivent pas au rythme des images).
+    // L'attracteur (vitesse w) est relié au téléphone par un ressort amorti (~0,55 Hz, amortissement 0,65) :
+    // il prend du retard quand le téléphone tourne, puis revient en place avec un léger rebond.
+    const a = 1 - Math.exp(-dt / 0.04), inp = PH.gIn.map(v => v * a);
+    for (let i = 0; i < 3; i++) PH.gIn[i] -= inp[i];
+    const g = (cfg.tiltInv ? -1 : 1) * cfg.tilt, K = 12.25, C = 4.55, n = Math.ceil(dt * 120), h = dt / n;
+    for (let s = 0; s < n; s++) for (let i = 0; i < 3; i++) {
+      PH.r[i] += (PH.w[i] - g * inp[i] / dt) * h;          // écart = rotation de l'attracteur - rotation du téléphone
+      PH.w[i] += (-K * PH.r[i] - C * PH.w[i]) * h;
+    }
+    const rm = Math.hypot(PH.r[0], PH.r[1], PH.r[2]);
+    if (rm > 1.2) PH.r = PH.r.map(v => v * 1.2 / rm);
+    PH.off += (PH.offT - PH.off) * (1 - Math.exp(-dt / 0.12));
+    PH.zoom += (PH.zoomT - PH.zoom) * (1 - Math.exp(-dt / 0.1));
+    PH.wake = Math.max(0, PH.wake - dt / 0.9);
+  }
+  cam.dist *= 1 + PH.zoom * 0.3 + PH.wake * PH.wake * 0.14;
+
+  // rotations dans le repère de l'écran, appliquées après la vue de départ : M = R · M
+  let q = qMul(qRot(PH.r[0], PH.r[1], PH.r[2]), PH.qT);
+  if (cfg.pan) q = qMul(qRot(0, -PH.off * 0.8, 0), q);
+  const [w, x, y, z] = q, M = cam.rot;
+  RM[0] = 1 - 2 * (y * y + z * z); RM[1] = 2 * (x * y - w * z); RM[2] = 2 * (x * z + w * y);
+  RM[3] = 2 * (x * y + w * z); RM[4] = 1 - 2 * (x * x + z * z); RM[5] = 2 * (y * z - w * x);
+  RM[6] = 2 * (x * z - w * y); RM[7] = 2 * (y * z + w * x); RM[8] = 1 - 2 * (x * x + y * y);
+  for (let c = 0; c < 3; c++) {
+    const a0 = M[c * 3], a1 = M[c * 3 + 1], a2 = M[c * 3 + 2];
+    for (let r = 0; r < 3; r++) M[c * 3 + r] = RM[r * 3] * a0 + RM[r * 3 + 1] * a1 + RM[r * 3 + 2] * a2;
+  }
+  // le ciel suit le mouvement, comme avec la souris sur PC (et revient doucement à sa place)
+  if (PH.qPrev) { const d = qLog(qMul(q, qConj(PH.qPrev))); PH.sx -= d[1]; PH.sy += d[0]; }
+  PH.qPrev = q;
+  const e = Math.exp(-Math.max(0, dt) / 25); PH.sx *= e; PH.sy *= e;
+  cam.yaw += PH.sx; cam.pitch += PH.sy;
+};
+
+if (MOBILE) {
+  window.__phone = phone;
+  // navigateur ou aperçu dans l'appli : doigt (ou souris) directement sur la page
+  let pid = null, asked = false;
+  addEventListener('pointerdown', e => {
+    if (pid !== null) return;
+    pid = e.pointerId; touchStart(e.clientX, e.clientY, e.timeStamp);
+    if (!asked && !cfg.native) {                            // iPhone : l'accès aux capteurs se demande après un geste
+      asked = true;
+      try { if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') DeviceMotionEvent.requestPermission().catch(() => {}); } catch (err) {}
+    }
+  });
+  addEventListener('pointermove', e => { if (e.pointerId === pid) touchMove(e.clientX, e.clientY, e.timeStamp); });
+  const up = e => { if (e.pointerId === pid) { pid = null; touchEnd(e.timeStamp); } };
+  addEventListener('pointerup', up); addEventListener('pointercancel', up);
+  if (!cfg.native) addEventListener('devicemotion', e => {
+    let iv = e.interval || 16; if (iv < 1) iv *= 1000;      // en ms (certains navigateurs l'ont donné en secondes)
+    const r = e.rotationRate;
+    if (r && r.alpha !== null && r.beta !== null) {
+      const f = Math.PI / 180 * iv / 1000;                  // degrés/s -> rad sur l'intervalle
+      let x = (r.beta || 0) * f, y = (r.gamma || 0) * f;
+      const ang = ((((screen.orientation ? screen.orientation.angle : window.orientation) || 0) % 360) + 360) % 360;
+      if (ang === 90) [x, y] = [-y, x]; else if (ang === 180) [x, y] = [-x, -y]; else if (ang === 270) [x, y] = [y, -x];
+      phone.rot(x, y, (r.alpha || 0) * f);
+    }
+    const ac = e.acceleration;
+    if (ac && ac.x !== null) shake(Math.hypot(ac.x || 0, ac.y || 0, ac.z || 0));
+  });
+}
+// appli Android : l'écran de réglages pilote l'aperçu (affiché dans un cadre) par messages
+addEventListener('message', e => {
+  const d = e.data;
+  if (!d || typeof d !== 'object') return;
+  if (d.lorenzProps && typeof d.lorenzProps === 'object') window.wallpaperPropertyListener.applyUserProperties(d.lorenzProps);
+  if (MOBILE && Array.isArray(d.lorenzPhone) && Object.prototype.hasOwnProperty.call(phone, d.lorenzPhone[0])) phone[d.lorenzPhone[0]](...d.lorenzPhone.slice(1));
+});
+if (DEBUG) window.__dbg = { PH, kick, cfg, phone, pos: () => pos, shown: () => col, N: () => N };
 
 function pass(prog, target, tex, texel) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, target.fb);
@@ -622,23 +844,28 @@ function frame(now) {
 
   // caméra : orbite lente + parallaxe souris amortie
   yaw += dt * cfg.autoRotate;
-  // souris comme dans l'original : position absolue -> angle (±2 rad sur chaque axe), l'angle reste où on le laisse
+  // écran vertical (téléphone, écran pivoté) : l'attracteur est tourné et la caméra recule pour qu'il tienne en largeur
+  const aspect = W / H, portrait = aspect < 0.95;
+  const rollFix = cfg.roll >= 0 ? cfg.roll : portrait ? 2.25 : 0;                // les deux ailes l'une au-dessus de l'autre
+  // souris : position absolue -> angle (±2 rad sur chaque axe), l'angle reste où on le laisse.
+  // La face avant de l'attracteur suit le curseur dans les deux axes (avant, l'axe horizontal était inversé).
+  // L'écart au repos est ramené dans le repère de l'image avant sa rotation, pour rester juste sur écran vertical.
   const k = 1 - Math.pow(0.0005, dt);
-  const tx = cfg.mouse ? mxT * cfg.mouseStrength : 0, ty = cfg.mouse ? myT * cfg.mouseStrength : 0.2;
+  const tx = cfg.mouse && !MOBILE ? mxT * cfg.mouseStrength : 0, ty = cfg.mouse && !MOBILE ? myT * cfg.mouseStrength : 0.2;
   mx += (tx - mx) * k; my += (ty - my) * k;
+  const ex = mx, ey = my - 0.2, cR = Math.cos(rollFix), sR = Math.sin(rollFix);
   const cam = {
     t: t + t0,
-    yaw: yaw + Math.sin(T * 0.11) * 0.5 * cfg.sway + mx * 2,
-    pitch: Math.sin(T * 0.13) * 0.32 * cfg.sway + my * 2,
+    yaw: yaw + Math.sin(T * 0.11) * 0.5 * cfg.sway - (cR * ex - sR * ey) * 2,
+    pitch: Math.sin(T * 0.13) * 0.32 * cfg.sway + 0.4 + (sR * ex + cR * ey) * 2,
     dist: 3.6 + Math.sin(T * 0.09) * 0.45 * cfg.sway - bass * 0.2,
-    roll: Math.sin(T * 0.07) * 0.16 * cfg.sway,
+    roll: Math.sin(T * 0.07) * 0.16 * cfg.sway + rollFix,
     focal: 1 / Math.tan((38 * Math.PI / 180) / 2),
   };
-  // écran vertical (téléphone, écran pivoté) : l'attracteur est tourné de 90° et la caméra recule pour qu'il tienne en largeur
-  const aspect = W / H, portrait = aspect < 0.95;
-  cam.roll += cfg.roll >= 0 ? cfg.roll : portrait ? 2.25 : 0;                     // les deux ailes l'une au-dessus de l'autre
   cam.dist *= cfg.zoom > 0 ? cfg.zoom : portrait ? Math.min(2.2, Math.max(1, 0.72 / aspect)) : 1;
   cam.rot = rotation(cam.yaw, cam.pitch, cam.roll);
+  if (MOBILE) applyMobile(cam, dt);                      // doigt, gyroscope : rotations dans le repère de l'écran
+  if (DEBUG) window.__cam = { rot: Array.from(cam.rot), dist: cam.dist, yaw: cam.yaw, pitch: cam.pitch };
 
   // 1. scène (traînées 3D + têtes) en HDR, additive, MSAA si possible
   gl.bindFramebuffer(gl.FRAMEBUFFER, ms ? ms.fb : scene.fb);
