@@ -105,6 +105,12 @@ const canvas = document.getElementById('c');
 const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, depth: false, stencil: false, powerPreference: 'high-performance' });
 const fail = msg => { const e = document.getElementById('err'); e.textContent = msg; e.style.display = 'grid'; };
 if (!gl) { fail('Ce fond d\'écran a besoin de WebGL 2.'); return; }
+/* Carte graphique réinitialisée (verrouillage, veille, changement d'écran ou de pilote) : tout ce qui était sur
+   la carte est perdu, on recharge la page (les réglages sont gardés, voir savedProps). */
+let reloading = false;
+const reloadPage = () => { if (!reloading) { reloading = true; location.reload(); } };
+canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); setTimeout(reloadPage, 3000); });
+canvas.addEventListener('webglcontextrestored', reloadPage);
 
 // cibles HDR (RGBA16F) : EXT_color_buffer_float sur PC, souvent seulement EXT_color_buffer_half_float sur téléphone
 const HDR = (!!gl.getExtension('EXT_color_buffer_float') || !!gl.getExtension('EXT_color_buffer_half_float')) && (() => {
@@ -711,9 +717,15 @@ function updatePalette() {
 
 /* ---------------------------- Interaction ---------------------------- */
 let mxT = 0, myT = 0.2, mx = 0, my = 0.2;           // 0.2 -> inclinaison de départ 0.4 rad, comme l'original
-addEventListener('pointermove', e => {
-  mxT = e.clientX / innerWidth * 2 - 1; myT = e.clientY / innerHeight * 2 - 1;
-});
+// au démarrage la fenêtre peut encore faire 0 px : une position invalide figerait la caméra pour de bon
+const onMouse = e => {
+  const w = innerWidth || screen.width, h = innerHeight || screen.height;
+  if (!(w > 0 && h > 0)) return;
+  const x = e.clientX / w * 2 - 1, y = e.clientY / h * 2 - 1;
+  if (Number.isFinite(x) && Number.isFinite(y)) { mxT = Math.max(-1, Math.min(1, x)); myT = Math.max(-1, Math.min(1, y)); }
+};
+addEventListener('pointermove', onMouse);
+addEventListener('mousemove', onMouse);
 addEventListener('resize', resize);
 
 let bassT = 0, bass = 0;
@@ -724,8 +736,15 @@ function onAudio(a) {
 }
 if (window.wallpaperRegisterAudioListener) window.wallpaperRegisterAudioListener(onAudio);
 
+// derniers réglages reçus, gardés pour la session : un rechargement de la page les retrouve tout de suite
+let savedProps = {};
+try { savedProps = JSON.parse(sessionStorage.getItem('lorenzProps') || '{}') || {}; } catch (e) { savedProps = {}; }
 window.wallpaperPropertyListener = {
   applyUserProperties(p) {
+    if (p !== savedProps) {
+      savedProps = Object.assign({}, savedProps, p);
+      try { sessionStorage.setItem('lorenzProps', JSON.stringify(savedProps)); } catch (e) { /* stockage indisponible */ }
+    }
     const num = ['spdIn', 'spdOut', 'count', 'trail', 'speed', 'hueSpeed', 'spread', 'bloom', 'brightness', 'heads', 'autoRotate', 'smooth', 'sway', 'morph', 'mouseStrength', 'stars', 'nebula', 'audioGain',
       'touch', 'tilt', 'recenter', 'fps'];                 // ces derniers ne viennent que de l'appli Android
     let realloc = false, pal = false;
@@ -754,14 +773,28 @@ window.wallpaperPropertyListener = {
   applyGeneralProperties(p) { if (p.fps !== undefined) cfg.fps = +p.fps; },
   setPaused(v) { setPause(!!v); },
 };
-let paused = false, rafId = 0;
+/* Pause. Dans Wallpaper Engine, seul setPaused compte : au déverrouillage du PC, l'état « page cachée » du
+   navigateur intégré peut arriver en retard et rester bloqué sur caché, ce qui figeait le fond pour de bon. */
+let paused = false, rafId = 0, beat = performance.now();
+function restartLoop() {                                          // (re)lance la boucle de rendu
+  if (paused) return;
+  cancelAnimationFrame(rafId); clearTimeout(sleepId); rafId = sleepId = 0;
+  prev = lastDraw = beat = performance.now();
+  rafId = requestAnimationFrame(frame);
+}
 function setPause(v) {
-  if (v === paused) return;
+  if (v === paused) { if (!v && performance.now() - beat > 1000) restartLoop(); return; }
   paused = v;
   if (paused) { cancelAnimationFrame(rafId); clearTimeout(sleepId); rafId = sleepId = 0; }
-  else if (!rafId && !sleepId) { prev = lastDraw = performance.now(); rafId = requestAnimationFrame(frame); }
+  else restartLoop();
 }
-document.addEventListener('visibilitychange', () => setPause(document.hidden));
+if (!IN_WE) document.addEventListener('visibilitychange', () => setPause(document.hidden));
+// filet de sécurité : si plus aucune image n'est dessinée alors que rien n'est en pause, on relance
+setInterval(() => {
+  if (gl.isContextLost()) return;
+  if (!paused && performance.now() - beat > 2000) restartLoop();
+}, 1000);
+addEventListener('focus', () => { if (!paused && performance.now() - beat > 500) restartLoop(); });
 
 /* ------------------------------- Rendu ------------------------------- */
 function bindCommon(u, cam) {
@@ -1022,7 +1055,7 @@ function nextFrame() {
   rafId = requestAnimationFrame(frame);
 }
 function frame(now) {
-  rafId = 0;
+  rafId = 0; beat = performance.now();
   try { draw(now); } finally { if (!paused && !rafId && !sleepId) nextFrame(); }
 }
 function draw(now) {
@@ -1058,6 +1091,7 @@ function draw(now) {
   const k = 1 - Math.pow(0.0005, dt);
   const tx = cfg.mouse && !MOBILE ? mxT * cfg.mouseStrength : 0, ty = cfg.mouse && !MOBILE ? myT * cfg.mouseStrength : 0.2;
   mx += (tx - mx) * k; my += (ty - my) * k;
+  if (!Number.isFinite(mx) || !Number.isFinite(my)) { mx = tx; my = ty; }
   const ex = mx, ey = my - 0.2, cR = Math.cos(rollFix), sR = Math.sin(rollFix);
   const cam = {
     t: t + t0,
@@ -1168,6 +1202,7 @@ updatePalette();
 resize();
 alloc();
 reportQuality();
+if (Object.keys(savedProps).length) try { window.wallpaperPropertyListener.applyUserProperties(savedProps); } catch (e) { /* réglages illisibles */ }
 for (let i = +(qs.get('warm') || 0); i > 0; i--) tick(1);
 rafId = requestAnimationFrame(frame);
 })();
