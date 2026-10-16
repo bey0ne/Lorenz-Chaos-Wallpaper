@@ -332,7 +332,8 @@ void main() {
 
 const COMP_FS = `#version 300 es
 precision highp float;
-uniform sampler2D uScene, uBloom, uSky;
+uniform sampler2D uScene, uBloom, uSky, uSkyB;
+uniform float uSkyMix;
 uniform vec2 uRes, uCam, uExt;
 uniform float uTime, uBloomI, uExposure, uStars, uPulse, uPx;
 in vec2 vUv; out vec4 o;
@@ -399,7 +400,8 @@ void main() {
 
   // ciel lointain (Voie lactée, nébuleuses), calculé à part et lentement : il glisse un peu avec la caméra
   vec2 sc = 3.2 * tanh(uCam / 3.2), sh = sc * vec2(0.048, 0.032);
-  vec4 sky = texture(uSky, (p + sh) / uExt * 0.5 + 0.5);
+  vec2 suv = (p + sh) / uExt * 0.5 + 0.5;
+  vec4 sky = mix(texture(uSky, suv), texture(uSkyB, suv), uSkyMix);   // fondu entre l'ancien ciel et le nouveau
   vec3 bg = vec3(0.00035, 0.00035, 0.0007) + sky.rgb * sky.rgb * (1.0 + uPulse * 0.5);
 
   // étoiles : une poussière d'étoiles qui dessine la Voie lactée, puis des étoiles de plus en plus proches
@@ -423,7 +425,9 @@ void main() {
 }`;
 
 /* Ciel lointain, calculé dans une texture à mi-résolution un peu plus grande que l'écran (marge pour la
-   parallaxe) et rafraîchi par bandes, une bande par image : il évolue très lentement, inutile de tout refaire. */
+   parallaxe). Il évolue très lentement : le ciel suivant est calculé en coulisse, une bande à la fois mais à
+   un instant figé (sinon les raccords entre bandes descendent à l'écran comme une cascade), puis il remplace
+   l'actuel en fondu enchaîné pendant que le suivant se prépare. */
 const SKY_FS = `#version 300 es
 precision highp float;
 uniform vec2 uExt, uNebA, uNebB;
@@ -534,7 +538,7 @@ function freeTarget(r) { if (r) { gl.deleteTexture(r.t); gl.deleteFramebuffer(r.
 
 // ciel lointain : texture à mi-résolution avec une marge de parallaxe (SKY_M, en hauteurs d'écran), rafraîchie par bandes
 const SKY_M = 0.16, SKY_STRIPS = 12;
-let sky = null, skyExt = [1, 1], skyStrip = 0, skyFull = true, skyClear = false, skyT = 0;
+let skyTex = [], skyOld = null, skyCur = null, skyBuild = null, skyExt = [1, 1], skyStrip = 0, skyFull = true, skyClear = false, skyT = 0, skyTime = 0;
 let W = 0, H = 0, scene = null, ms = null, levels = [];
 let renderScale = 1, msaaNow = -1;
 function resize() {
@@ -544,10 +548,12 @@ function resize() {
   msaaNow = samples();
   W = canvas.width = w; H = canvas.height = h;
 
-  freeTarget(scene); freeTarget(sky); levels.forEach(freeTarget);
+  freeTarget(scene); skyTex.forEach(freeTarget); levels.forEach(freeTarget);
   skyExt = [W / H / 2 + SKY_M, 0.5 + SKY_M];
   const sd = Math.min(H * 0.75, SKY_DENSITY);                                 // pixels du ciel par hauteur d'écran
-  sky = makeTarget(Math.max(1, Math.round(2 * skyExt[0] * sd)), Math.max(1, Math.round(2 * skyExt[1] * sd)));
+  const sw = Math.max(1, Math.round(2 * skyExt[0] * sd)), sh = Math.max(1, Math.round(2 * skyExt[1] * sd));
+  skyTex = [makeTarget(sw, sh), makeTarget(sw, sh), makeTarget(sw, sh)];
+  [skyOld, skyCur, skyBuild] = skyTex;
   skyFull = true; skyClear = false;
   if (ms) { gl.deleteRenderbuffer(ms.rb); gl.deleteFramebuffer(ms.fb); ms = null; }
 
@@ -1145,14 +1151,18 @@ function draw(now) {
   for (let i = levels.length - 1; i > 0; i--) pass(P_UP, levels[i - 1], levels[i].t, [1 / levels[i].w, 1 / levels[i].h]);
   gl.disable(gl.BLEND);
 
-  // 3. ciel lointain : une bande tous les 1/15 s, il évolue très lentement (tout d'un coup après un redimensionnement
-  //    ou un changement de palette)
+  // 3. ciel lointain : une bande du ciel suivant tous les 1/15 s, toutes à un même instant figé ; une fois
+  //    complet, il remplace l'actuel en fondu (tout d'un coup après un redimensionnement ou un changement de palette)
+  const SKY_STEP = LOWPOWER ? 1 / 6 : 1 / 15;
   skyT += dt;
-  if (cfg.nebula > 0 && (skyFull || skyT >= (LOWPOWER ? 1 / 6 : 1 / 15))) {
-    skyT = 0;
+  if (cfg.nebula > 0 && (skyFull || skyT >= SKY_STEP)) {
+    skyT = skyFull ? 0 : Math.min(skyT - SKY_STEP, SKY_STEP);
     skyClear = false;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, sky.fb);
-    gl.viewport(0, 0, sky.w, sky.h);
+    if (skyFull) { skyStrip = 0; skyTime = cam.t; }
+    else if (skyStrip === 0) skyTime = cam.t;
+    const dst = skyFull ? skyCur : skyBuild;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
+    gl.viewport(0, 0, dst.w, dst.h);
     gl.useProgram(P_SKY.p);
     const asp = W / H, por = smooth01(1.3, 0.7, asp);                         // écran vertical : nébuleuses en haut et en bas
     const at = (ux, uy, px, py) => [((ux + (px - ux) * por) - 0.5) * asp, (uy + (py - uy) * por) - 0.5];
@@ -1162,20 +1172,27 @@ function draw(now) {
     gl.uniform3fv(P_SKY.u.uTint, skyTint);
     gl.uniform3fv(P_SKY.u.uTint2, skyTint2);
     gl.uniform1f(P_SKY.u.uMono, skyMono);
-    gl.uniform1f(P_SKY.u.uTime, cam.t);
+    gl.uniform1f(P_SKY.u.uTime, skyTime);
     gl.uniform1f(P_SKY.u.uNebula, cfg.nebula);
     gl.enable(gl.SCISSOR_TEST);
     for (let n = skyFull ? SKY_STRIPS : 1; n > 0; n--) {
-      const y0 = Math.floor(skyStrip * sky.h / SKY_STRIPS), y1 = Math.floor((skyStrip + 1) * sky.h / SKY_STRIPS);
-      gl.scissor(0, y0, sky.w, y1 - y0);
+      const y0 = Math.floor(skyStrip * dst.h / SKY_STRIPS), y1 = Math.floor((skyStrip + 1) * dst.h / SKY_STRIPS);
+      gl.scissor(0, y0, dst.w, y1 - y0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      skyStrip = (skyStrip + 1) % SKY_STRIPS;
+      skyStrip++;
     }
     gl.disable(gl.SCISSOR_TEST);
-    skyFull = false;
+    if (skyFull) {                                         // ciel complet tout de suite, sans fondu
+      skyOld = skyCur; skyStrip = 0; skyFull = false;
+    } else if (skyStrip >= SKY_STRIPS) {                   // ciel suivant prêt : il devient l'actuel, le fondu repart
+      const free = skyOld;
+      skyOld = skyCur; skyCur = skyBuild; skyBuild = free === skyCur || free === skyOld ? skyTex.find(x => x !== skyOld && x !== skyCur) : free;
+      skyStrip = 0;
+    }
   } else if (cfg.nebula <= 0 && !skyClear) {
     skyClear = true;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, sky.fb); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.clearColor(0, 0, 0, 0);
+    for (const x of skyTex) { gl.bindFramebuffer(gl.FRAMEBUFFER, x.fb); gl.clear(gl.COLOR_BUFFER_BIT); }
   }
 
   // 4. composition finale
@@ -1185,7 +1202,9 @@ function draw(now) {
   gl.useProgram(P_COMP.p);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, scene.t); gl.uniform1i(u.uScene, 0);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, levels[0].t); gl.uniform1i(u.uBloom, 1);
-  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, sky.t); gl.uniform1i(u.uSky, 2);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, skyOld.t); gl.uniform1i(u.uSky, 2);
+  gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, skyCur.t); gl.uniform1i(u.uSkyB, 3);
+  gl.uniform1f(u.uSkyMix, skyOld === skyCur ? 1 : Math.min(1, (skyStrip + Math.min(1, skyT / SKY_STEP)) / SKY_STRIPS));
   gl.uniform2f(u.uExt, skyExt[0], skyExt[1]);
   gl.uniform1f(u.uPx, 1080 / Math.min(W, H));
   gl.uniform2f(u.uRes, W, H);
