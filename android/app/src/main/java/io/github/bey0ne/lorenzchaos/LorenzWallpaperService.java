@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
@@ -79,7 +80,7 @@ public class LorenzWallpaperService extends WallpaperService {
         private boolean hot;
         private int failures;                              // échecs de suite : on réessaie de plus en plus tard
         private final Runnable rebuild = () -> {
-            if (holder != null && width > 0 && height > 0) build();
+            if (holder != null) build();
         };
         // mode économie d'énergie activé ou coupé : la qualité automatique s'adapte
         private final BroadcastReceiver powerSave = new BroadcastReceiver() {
@@ -154,6 +155,20 @@ public class LorenzWallpaperService extends WallpaperService {
         private void build() {
             handler.removeCallbacks(rebuild);
             release();
+            // Android peut d'abord annoncer une surface de taille nulle (pliables au démarrage) : on lit la vraie
+            // taille de la surface, et tant qu'elle reste nulle on revérifie un peu plus tard, sans rien créer
+            if (width <= 0 || height <= 0) {
+                try {
+                    Rect r = holder.getSurfaceFrame();
+                    if (r != null) { width = r.width(); height = r.height(); }
+                } catch (RuntimeException ignored) {
+                    // surface pas encore prête
+                }
+                if (width <= 0 || height <= 0) {
+                    handler.postDelayed(rebuild, 300);
+                    return;
+                }
+            }
             if (!unlocked()) {                             // avant le premier déverrouillage : on attend
                 handler.postDelayed(rebuild, 2000);
                 return;
@@ -202,7 +217,7 @@ public class LorenzWallpaperService extends WallpaperService {
         @Override
         public void onVisibilityChanged(boolean visible) {
             if (web == null) {                             // création en attente (échec précédent) : on retente tout de suite
-                if (visible && holder != null && width > 0 && height > 0) { failures = 0; handler.post(rebuild); }
+                if (visible && holder != null) { failures = 0; handler.post(rebuild); }
                 return;
             }
             if (visible) {
