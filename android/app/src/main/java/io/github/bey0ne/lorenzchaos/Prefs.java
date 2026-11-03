@@ -26,7 +26,11 @@ final class Prefs {
     }
 
     static String query(Context c) {
-        return get(c).getString(KEY, "");
+        try {
+            return get(c).getString(KEY, "");
+        } catch (RuntimeException e) {                     // réglages illisibles (téléphone pas encore déverrouillé…)
+            return "";
+        }
     }
 
     static void save(Context c, String q) {

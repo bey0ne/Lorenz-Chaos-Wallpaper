@@ -17,6 +17,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
+import android.os.UserManager;
 import android.service.wallpaper.WallpaperService;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
@@ -44,6 +45,12 @@ public class LorenzWallpaperService extends WallpaperService {
     };
 
     @Override
+    public void onCreate() {
+        super.onCreate();
+        CrashLog.install(this);
+    }
+
+    @Override
     public Engine onCreateEngine() {
         return new LorenzEngine();
     }
@@ -65,11 +72,12 @@ public class LorenzWallpaperService extends WallpaperService {
         private final Runnable reload = () -> {
             if (web == null) return;
             web.loadUrl(Prefs.wallpaperUrl(LorenzWallpaperService.this));
-            sensors.stop();                                // les réglages ont pu couper l'inertie ou la secousse
+            if (sensors != null) sensors.stop();          // les réglages ont pu couper l'inertie ou la secousse
             if (isVisible()) startSensors();
         };
         private Object thermal;                            // PowerManager.OnThermalStatusChangedListener (Android 10+)
         private boolean hot;
+        private int failures;                              // échecs de suite : on réessaie de plus en plus tard
         private final Runnable rebuild = () -> {
             if (holder != null && width > 0 && height > 0) build();
         };
@@ -88,11 +96,28 @@ public class LorenzWallpaperService extends WallpaperService {
             setTouchEventsEnabled(true);
             setOffsetNotificationsEnabled(true);
             sensors = new PhoneSensors(LorenzWallpaperService.this, this::js);
-            Prefs.get(LorenzWallpaperService.this).registerOnSharedPreferenceChangeListener(this);
-            IntentFilter saver = new IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED);
-            if (Build.VERSION.SDK_INT >= 33) registerReceiver(powerSave, saver, Context.RECEIVER_NOT_EXPORTED);
-            else registerReceiver(powerSave, saver);
-            // téléphone qui chauffe : on passe en économe (et on revient quand il a refroidi)
+            // rien de tout ceci n'est indispensable : une erreur ici ne doit pas empêcher le fond de s'afficher
+            try {
+                Prefs.get(LorenzWallpaperService.this).registerOnSharedPreferenceChangeListener(this);
+            } catch (RuntimeException e) {
+                CrashLog.note(LorenzWallpaperService.this, "réglages", e);
+            }
+            try {
+                IntentFilter saver = new IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED);
+                if (Build.VERSION.SDK_INT >= 33) registerReceiver(powerSave, saver, Context.RECEIVER_NOT_EXPORTED);
+                else registerReceiver(powerSave, saver);
+            } catch (RuntimeException e) {
+                CrashLog.note(LorenzWallpaperService.this, "économie d'énergie", e);
+            }
+            try {
+                watchThermal();
+            } catch (RuntimeException e) {
+                CrashLog.note(LorenzWallpaperService.this, "température", e);
+            }
+        }
+
+        /** Téléphone qui chauffe : on passe en économe (et on revient quand il a refroidi). */
+        private void watchThermal() {
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
             if (Build.VERSION.SDK_INT >= 29 && pm != null) {
                 hot = Prefs.isHot(pm);
@@ -121,9 +146,40 @@ public class LorenzWallpaperService extends WallpaperService {
             build();
         }
 
-        @SuppressLint("SetJavaScriptEnabled")
+        /**
+         * Crée l'écran virtuel, la fenêtre et la WebView. Juste après un redémarrage, ou quand un téléphone
+         * pliable change d'écran, une de ces étapes peut échouer (WebView pas encore prête, surface déjà
+         * remplacée…) : au lieu de faire planter l'appli, on note l'erreur et on réessaie un peu plus tard.
+         */
         private void build() {
+            handler.removeCallbacks(rebuild);
             release();
+            if (!unlocked()) {                             // avant le premier déverrouillage : on attend
+                handler.postDelayed(rebuild, 2000);
+                return;
+            }
+            try {
+                create();
+                failures = 0;
+            } catch (Throwable e) {
+                CrashLog.note(LorenzWallpaperService.this, "création du fond d'écran (essai " + (failures + 1) + ")", e);
+                release();
+                long delay = Math.min(30_000L, 1000L << Math.min(5, failures++));   // 1 s, 2 s, 4 s… 30 s
+                handler.postDelayed(rebuild, delay);
+            }
+        }
+
+        private boolean unlocked() {
+            try {
+                UserManager um = (UserManager) getSystemService(USER_SERVICE);
+                return um == null || um.isUserUnlocked();
+            } catch (RuntimeException e) {
+                return true;
+            }
+        }
+
+        @SuppressLint("SetJavaScriptEnabled")
+        private void create() {
             DisplayManager dm = (DisplayManager) getSystemService(DISPLAY_SERVICE);
             display = dm.createVirtualDisplay("lorenz-chaos", width, height,
                     getResources().getDisplayMetrics().densityDpi, holder.getSurface(), 0);
@@ -138,19 +194,17 @@ public class LorenzWallpaperService extends WallpaperService {
             web.setWebViewClient(new LocalOnlyClient(() -> handler.post(rebuild)));
             web.loadUrl(Prefs.wallpaperUrl(LorenzWallpaperService.this));
             presentation.setContentView(web);
-            try {
-                presentation.show();
-            } catch (RuntimeException e) {                // écran virtuel déjà disparu (surface détruite entre-temps)
-                release();
-                return;
-            }
+            presentation.show();
             if (isVisible()) startSensors();
             else web.onPause();
         }
 
         @Override
         public void onVisibilityChanged(boolean visible) {
-            if (web == null) return;
+            if (web == null) {                             // création en attente (échec précédent) : on retente tout de suite
+                if (visible && holder != null && width > 0 && height > 0) { failures = 0; handler.post(rebuild); }
+                return;
+            }
             if (visible) {
                 web.onResume();
                 js("window.__phone&&__phone.pause(0)");
@@ -215,6 +269,7 @@ public class LorenzWallpaperService extends WallpaperService {
 
         @Override
         public void onSurfaceDestroyed(SurfaceHolder surfaceHolder) {
+            handler.removeCallbacks(rebuild);
             release();
             holder = null;
             super.onSurfaceDestroyed(surfaceHolder);
@@ -239,16 +294,24 @@ public class LorenzWallpaperService extends WallpaperService {
         }
 
         private void js(String code) {
-            if (web != null) web.evaluateJavascript(code, null);
+            try {
+                if (web != null) web.evaluateJavascript(code, null);
+            } catch (RuntimeException ignored) {
+                // WebView en cours de remplacement
+            }
         }
 
+        /** Chaque étape à part : un écran déjà disparu ne doit pas empêcher de libérer le reste. */
         private void release() {
-            if (sensors != null) sensors.stop();
+            try { if (sensors != null) sensors.stop(); } catch (RuntimeException ignored) { /* déjà arrêtés */ }
             handler.removeCallbacks(flushMove);
             pendingMove = null;
-            if (presentation != null) { presentation.dismiss(); presentation = null; }
-            if (web != null) { web.destroy(); web = null; }
-            if (display != null) { display.release(); display = null; }
+            try { if (presentation != null) presentation.dismiss(); } catch (RuntimeException ignored) { /* fenêtre déjà fermée */ }
+            presentation = null;
+            try { if (web != null) web.destroy(); } catch (RuntimeException ignored) { /* déjà détruite */ }
+            web = null;
+            try { if (display != null) display.release(); } catch (RuntimeException ignored) { /* déjà libéré */ }
+            display = null;
         }
     }
 }

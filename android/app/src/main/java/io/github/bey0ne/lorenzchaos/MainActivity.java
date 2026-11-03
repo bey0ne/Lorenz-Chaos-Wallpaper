@@ -36,6 +36,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
+        CrashLog.install(this);
         Window w = getWindow();
         // l'aperçu passe sous les barres du système ; la page garde ses boutons hors de leur chemin
         if (Build.VERSION.SDK_INT >= 30) w.setDecorFitsSystemWindows(false);
@@ -164,6 +165,22 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void apply() {
             runOnUiThread(MainActivity.this::openPicker);
+        }
+
+        /** Dernière erreur enregistrée (vide s'il n'y en a pas), pour l'afficher dans les réglages. */
+        @JavascriptInterface
+        public String lastError() {
+            return CrashLog.read(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public boolean copyError() {
+            return CrashLog.copy(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public void clearError() {
+            CrashLog.clear(MainActivity.this);
         }
 
         @JavascriptInterface
