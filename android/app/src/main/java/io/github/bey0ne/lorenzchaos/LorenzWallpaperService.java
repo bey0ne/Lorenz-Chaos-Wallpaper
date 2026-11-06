@@ -43,6 +43,15 @@ public class LorenzWallpaperService extends WallpaperService {
             {0xFFFF8A00, 0xFFFF2A00, 0xFFFFD36B},   // braise
             {0xFF3FA9FF, 0xFF6A5CFF, 0xFFBFF8FF},   // glacier
             {0xFFFFCF5A, 0xFFFF9D2E, 0xFFC9772B},   // or
+            null,                                   // perso : la couleur choisie (voir onComputeColors)
+            {0xFFFF2E97, 0xFFA23DFF, 0xFF2DE2FF},   // synthwave
+            {0xFF1FB2FF, 0xFFFF3D14, 0xFFFF9E2C},   // feu et glace
+            {0xFFFF8FC2, 0xFFFF4F9A, 0xFFC58CFF},   // sakura
+            {0xFF00F0D0, 0xFF0AA8FF, 0xFF1F4DFF},   // abysses
+            {0xFFFF7AD9, 0xFF6EE0FF, 0xFFA98BFF},   // opale
+            {0xFF8A5CFF, 0xFFFFCC70, 0xFFFF6FB5},   // cosmos
+            {0xFFFF1744, 0xFFB3003C, 0xFFFF5A36},   // rubis
+            {0xFF00FF66, 0xFF00C853, 0xFF39FF14},   // terminal
     };
 
     @Override
@@ -270,7 +279,11 @@ public class LorenzWallpaperService extends WallpaperService {
         public WallpaperColors onComputeColors() {
             if (Build.VERSION.SDK_INT < 27) return null;
             int p = Prefs.palette(LorenzWallpaperService.this);
-            int[] c = COLORS[p >= 0 && p < COLORS.length ? p : 4];
+            int[] c = p >= 0 && p < COLORS.length ? COLORS[p] : null;
+            if (c == null) {
+                int custom = Prefs.customColor(LorenzWallpaperService.this);
+                c = custom != 0 ? new int[] {custom, custom, custom} : COLORS[4];
+            }
             return new WallpaperColors(Color.valueOf(c[0]), Color.valueOf(c[1]), Color.valueOf(c[2]));
         }
 

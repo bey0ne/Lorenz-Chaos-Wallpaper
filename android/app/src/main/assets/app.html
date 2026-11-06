@@ -129,7 +129,17 @@ const PALETTES = [
   ['Glacier', 'linear-gradient(135deg, #e6fbff, #3fa9ff 50%, #6a5cff)'],
   ['Or', 'linear-gradient(135deg, #fff1c4, #ffcf5a 45%, #c9772b)'],
   ['Perso', ''],                                           // couleur choisie avec Teinte et Saturation
+  // thèmes : traînées + ciel assorti (3e élément : pastille de « Comme les traînées » dans les couleurs du ciel)
+  ['Synthwave', 'linear-gradient(135deg, #2de2ff, #a23dff 40%, #ff2e97 75%, #ff8a3d)', 'linear-gradient(135deg, #7b2cff, #ff2e97)'],
+  ['Feu et glace', 'linear-gradient(135deg, #1fb2ff, #6b6bff 45%, #ff3d14 55%, #ff9e2c)', 'linear-gradient(135deg, #2a7bff, #ff5a1f)'],
+  ['Sakura', 'linear-gradient(135deg, #ffe1ee, #ff8fc2 40%, #ff4f9a 70%, #c58cff)', 'linear-gradient(135deg, #6f5cff, #ff6fae)'],
+  ['Abysses', 'linear-gradient(135deg, #7fffe6, #00f0d0 35%, #0aa8ff 65%, #1f4dff)', 'linear-gradient(135deg, #1450ff, #00c4a6)'],
+  ['Opale', 'linear-gradient(135deg, #ff7ad9, #a98bff 35%, #6ee0ff 65%, #7dffc4)', 'linear-gradient(135deg, #8fb4ff, #ff9ee6)'],
+  ['Cosmos', 'linear-gradient(135deg, #ffcc70, #ff6fb5 35%, #8a5cff 65%, #4d8dff)', 'linear-gradient(135deg, #6b3dff, #ffa94d)'],
+  ['Rubis', 'linear-gradient(135deg, #ff8fa3, #ff1744 40%, #b3003c 70%, #ff5a36)', 'linear-gradient(135deg, #ff1f4b, #8e24ff)'],
+  ['Terminal', 'linear-gradient(135deg, #b8ffcf, #39ff14 40%, #00c853 75%, #00ff66)', 'linear-gradient(135deg, #00e676, #00897b)'],
 ];
+const PAL_ORDER = [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 6];   // affichage : « Perso » à la fin
 // couleurs du ciel : mêmes choix que « Couleurs du ciel » dans Wallpaper Engine
 const SKYPALS = [
   ['Comme les traînées', ''],                              // pastille : la palette des traînées
@@ -259,11 +269,13 @@ for (const [title, list] of SECTIONS) {
     if (c.type === 'palette') {
       if (c.label) { const l = document.createElement('div'); l.className = 'lab'; l.textContent = c.label; row.appendChild(l); }
       const g = document.createElement('div'); g.className = 'pals'; row.appendChild(g);
-      ui[c.k] = (c.list || PALETTES).map(([name, css], i) => {
+      const list = c.list || PALETTES;
+      ui[c.k] = list.map(([name, css], i) => {                 // un bouton par valeur (indice = valeur enregistrée)
         const b = document.createElement('button'); b.className = 'pal';
         b.innerHTML = '<i></i><span></span>'; b.firstChild.style.background = css; b.lastChild.textContent = name;
-        b.onclick = () => set(c.k, i); g.appendChild(b); return b;
+        b.onclick = () => set(c.k, i); return b;
       });
+      for (const i of (list === PALETTES ? PAL_ORDER : list.map((_, i) => i))) g.appendChild(ui[c.k][i]);
     } else if (c.type === 'bool') {
       row.innerHTML = '<div class="switch"><span></span><button class="tog" role="switch"></button></div>';
       row.querySelector('span').textContent = c.label;
@@ -294,7 +306,8 @@ function render() {
     if (c.type === 'palette') {
       u.forEach((b, i) => b.setAttribute('aria-pressed', i === v));
       if (c.list === SKYPALS) {                            // « Comme les traînées » et « Perso » montrent les couleurs en vigueur
-        u[0].firstChild.style.background = val.palette === 6 ? customCss(val) : PALETTES[val.palette][1];
+        const pal = PALETTES[val.palette] || PALETTES[4];
+        u[0].firstChild.style.background = val.palette === 6 ? customCss(val) : (pal[2] || pal[1]);
         u[10].firstChild.style.background = skyCss(val);
       } else u[6].firstChild.style.background = customCss(val);   // la pastille « Perso » montre la couleur choisie
     }

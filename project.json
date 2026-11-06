@@ -49,6 +49,38 @@
 						"value": 5
 					},
 					{
+						"label": "Synthwave",
+						"value": 7
+					},
+					{
+						"label": "Feu et glace",
+						"value": 8
+					},
+					{
+						"label": "Sakura",
+						"value": 9
+					},
+					{
+						"label": "Abysses",
+						"value": 10
+					},
+					{
+						"label": "Opale",
+						"value": 11
+					},
+					{
+						"label": "Cosmos",
+						"value": 12
+					},
+					{
+						"label": "Rubis",
+						"value": 13
+					},
+					{
+						"label": "Terminal",
+						"value": 14
+					},
+					{
 						"label": "Couleur du thème",
 						"value": 6
 					}
@@ -276,8 +308,41 @@
 				"value": 1,
 				"condition": "mouse.value == true"
 			},
-			"stars": {
+			"move": {
 				"order": 21,
+				"text": "Mouvement",
+				"type": "combo",
+				"value": 1,
+				"condition": "mouse.value == true",
+				"options": [
+					{
+						"label": "Classique",
+						"value": 0
+					},
+					{
+						"label": "Fluide",
+						"value": 1
+					},
+					{
+						"label": "Élastique",
+						"value": 2
+					},
+					{
+						"label": "Apesanteur",
+						"value": 3
+					},
+					{
+						"label": "Toupie",
+						"value": 4
+					},
+					{
+						"label": "Aimant",
+						"value": 5
+					}
+				]
+			},
+			"stars": {
+				"order": 22,
 				"text": "Étoiles",
 				"type": "slider",
 				"fraction": true,
@@ -287,7 +352,7 @@
 				"value": 1
 			},
 			"nebula": {
-				"order": 22,
+				"order": 23,
 				"text": "Nébuleuse",
 				"type": "slider",
 				"fraction": true,
@@ -297,13 +362,13 @@
 				"value": 1
 			},
 			"audio": {
-				"order": 23,
+				"order": 24,
 				"text": "Réagir à l'audio",
 				"type": "bool",
 				"value": true
 			},
 			"audioGain": {
-				"order": 24,
+				"order": 25,
 				"text": "Sensibilité audio",
 				"type": "slider",
 				"fraction": true,
@@ -314,13 +379,13 @@
 				"condition": "audio.value == true"
 			},
 			"ribbon": {
-				"order": 25,
+				"order": 26,
 				"text": "Départ en ruban (comme l'original)",
 				"type": "bool",
 				"value": false
 			},
 			"quality": {
-				"order": 26,
+				"order": 27,
 				"text": "Qualité",
 				"type": "combo",
 				"value": 0,
@@ -336,7 +401,7 @@
 				]
 			},
 			"aa": {
-				"order": 27,
+				"order": 28,
 				"text": "Anticrénelage",
 				"type": "combo",
 				"value": 1,

@@ -24,7 +24,7 @@ const cfg = {
   count: 900,          // nombre de particules
   trail: 170,          // longueur des traînées (en ticks de 1/60 s)
   speed: 0.8,          // vitesse de simulation
-  palette: 0,          // 0 spectre, 1 néon, 2 aurore, 3 braise, 4 glacier, 5 or, 6 perso
+  palette: 0,          // 0 spectre, 1 néon, 2 aurore, 3 braise, 4 glacier, 5 or, 6 perso, 7 à 14 thèmes (voir PALETTES)
   custom: [0.48, 0.18, 1.0],
   skyPalette: 0,       // couleurs du ciel : 0 comme les traînées, 1 à 9 palettes du ciel, 10 couleur choisie
   skyCustom: [0.25, 0.55, 1.0],
@@ -39,6 +39,7 @@ const cfg = {
   morph: 0,            // respiration de la forme (paramètres de Lorenz qui varient)
   mouse: true,
   mouseStrength: 1.0,
+  move: 1,             // style de mouvement de la souris : 0 classique, 1 fluide, 2 élastique, 3 apesanteur, 4 toupie, 5 aimant
   stars: 1.0,
   nebula: 1.0,
   audio: true,
@@ -202,6 +203,7 @@ uniform int uL, uHead, uFilled;
 uniform mat3 uRot;
 uniform float uZc, uN, uDist, uFocal, uAspect, uScale, uTime, uHueSpeed, uSpread, uRainbow, uIntensity;
 uniform vec3 uPal[4];
+uniform vec2 uShift;                 // décalage de l'attracteur à l'écran (style « aimant »)
 
 vec3 palette(float t) {
   if (uRainbow > 0.5) {
@@ -217,7 +219,7 @@ vec4 project(vec3 s, out float depth) {
   w = uRot * w;
   float zc = uDist - w.z;
   depth = clamp((zc - uDist + 1.25) / 2.5, 0.0, 1.0);
-  return vec4(w.x * uFocal / uAspect, w.y * uFocal, 0.0, zc);
+  return vec4(w.x * uFocal / uAspect + uShift.x * zc, w.y * uFocal + uShift.y * zc, 0.0, zc);
 }
 // teinte cohérente dans l'espace (les zones gardent une couleur franche) + décalage par particule
 float hueAt(vec3 s, int p) { return s.x / 46.0 + s.z / 90.0 + float(p) / uN * uSpread * 0.18 + uTime * uHueSpeed; }
@@ -668,7 +670,29 @@ const PALETTES = [
   ['#ff2a00', '#ff8a00', '#ffd36b', '#ff2d6f'],           // braise
   ['#bff8ff', '#3fa9ff', '#6a5cff', '#e6fbff'],           // glacier
   ['#ffcf5a', '#ff9d2e', '#fff1c4', '#c9772b'],           // or
+  'perso',                                                // couleur du thème Windows ou couleur choisie (cfg.custom)
+  // thèmes : quatre couleurs qui se suivent en boucle ; les deux ailes de l'attracteur tombent à peu près sur
+  // la 1re et la 3e, les 2e et 4e font les transitions
+  ['#ff2e97', '#ff8a3d', '#a23dff', '#2de2ff'],           // synthwave
+  ['#ff3d14', '#ff9e2c', '#1fb2ff', '#6b6bff'],           // feu et glace
+  ['#ff8fc2', '#ffe1ee', '#ff4f9a', '#c58cff'],           // sakura
+  ['#00f0d0', '#0aa8ff', '#1f4dff', '#7fffe6'],           // abysses
+  ['#ff7ad9', '#6ee0ff', '#a98bff', '#7dffc4'],           // opale
+  ['#ffcc70', '#ff6fb5', '#8a5cff', '#4d8dff'],           // cosmos
+  ['#ff1744', '#ff8fa3', '#b3003c', '#ff5a36'],           // rubis
+  ['#00ff66', '#b8ffcf', '#00c853', '#39ff14'],           // terminal
 ];
+// ciel assorti à chaque thème, quand « Couleurs du ciel » est sur « Comme les traînées »
+const PALETTE_SKY = {
+  7: ['#7b2cff', '#ff2e97'],                              // synthwave : violet et rose
+  8: ['#2a7bff', '#ff5a1f'],                              // feu et glace : bleu et orange
+  9: ['#6f5cff', '#ff6fae'],                              // sakura : indigo et rose
+  10: ['#1450ff', '#00c4a6'],                             // abysses : bleu profond et turquoise
+  11: ['#8fb4ff', '#ff9ee6'],                             // opale : pastels
+  12: ['#6b3dff', '#ffa94d'],                             // cosmos : violet et ambre
+  13: ['#ff1f4b', '#8e24ff'],                             // rubis : cramoisi et pourpre
+  14: ['#00e676', '#00897b'],                             // terminal : verts
+};
 function hsl2rgb(h, s, l) {
   const f = n => { const k = (n + h * 12) % 12; return l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
   return [f(0), f(8), f(4)];
@@ -696,21 +720,23 @@ const SKY_PALETTES = [
 let palRGB = new Float32Array(12), tint = [0.5, 0.3, 1], tint2 = [0.9, 0.3, 0.6], skyTint = tint, skyTint2 = tint2, skyMono = 0;
 function updatePalette() {
   let stops;
-  if (cfg.palette === 0) {
+  const pi = cfg.palette | 0;
+  if (pi === 0) {
     stops = [[1, 0.3, 0.3], [0.3, 1, 0.4], [0.3, 0.5, 1], [1, 0.3, 1]];
     tint = [0.2, 0.5, 0.95]; tint2 = [0.95, 0.22, 0.5];          // nébuleuses bleu-vert et rouge-magenta
-  } else if (cfg.palette >= PALETTES.length) {
+  } else if (!Array.isArray(PALETTES[pi])) {                       // perso (ou valeur inconnue)
     const [h, s] = rgb2hsl(cfg.custom);
     const sat = Math.max(0.55, s);
     stops = [hsl2rgb(h, sat, 0.55), hsl2rgb((h + 0.07) % 1, sat, 0.68), hsl2rgb((h + 0.94) % 1, sat, 0.45), hsl2rgb(h, sat * 0.5, 0.85)];
   } else {
-    stops = PALETTES[cfg.palette].map(hex);
+    stops = PALETTES[pi].map(hex);
   }
   stops.forEach((c, i) => c.forEach((v, j) => { palRGB[i * 3 + j] = Math.pow(v, 2.2); }));
-  if (cfg.palette !== 0) {
+  if (pi !== 0) {
     tint = [0, 1, 2].map(j => (stops[0][j] + stops[1][j]) * 0.5);
     tint2 = [0, 1, 2].map(j => (stops[2][j] + stops[3][j]) * 0.5);
   }
+  if (PALETTE_SKY[pi]) [tint, tint2] = PALETTE_SKY[pi].map(hex);
   const sp = cfg.skyPalette | 0;
   skyMono = sp === 9 ? 1 : 0;
   if (sp >= 1 && sp < SKY_PALETTES.length) [skyTint, skyTint2] = SKY_PALETTES[sp].map(hex);
@@ -723,6 +749,22 @@ function updatePalette() {
 
 /* ---------------------------- Interaction ---------------------------- */
 let mxT = 0, myT = 0.2, mx = 0, my = 0.2;           // 0.2 -> inclinaison de départ 0.4 rad, comme l'original
+let mvx = 0, mvy = 0, motion = 0;                   // vitesse de la caméra souris, et son effet lissé (penche, recul, éclat)
+let spin = 0, spinV = 0, lastMx = 0, curMove = {};                // style toupie : angle lancé par les gestes, sa vitesse, dernière position
+let shx = 0, shy = 0, shvx = 0, shvy = 0;           // style aimant : décalage de l'attracteur à l'écran et sa vitesse
+/* Styles de mouvement (réglage « Mouvement ») :
+   f, z  : fréquence (Hz) et amortissement du ressort qui suit le curseur ; bank : penche dans les virages (max : bankMax)
+   dolly : recule pendant les gestes rapides ; glow : les traînées brillent pendant les gestes
+   range : part de l'amplitude utilisée en rotation ; float : flotte doucement même au repos
+   spin  : un geste horizontal lance la rotation, qui ralentit toute seule ; magnet : l'attracteur glisse vers le curseur */
+const MOVES = [
+  { classic: 1 },                                                                     // 0 classique (comme l'original)
+  { f: 1.2, z: 0.72, bank: 0.035, bankMax: 0.14, dolly: 0.06, glow: 0.18 },           // 1 fluide
+  { f: 1.6, z: 0.34, bank: 0.05, bankMax: 0.2, dolly: 0.08, glow: 0.25 },             // 2 élastique
+  { f: 0.4, z: 0.95, bank: 0.12, bankMax: 0.18, dolly: 0.04, glow: 0.12, float: 1 },  // 3 apesanteur
+  { f: 1.2, z: 0.75, bank: 0.03, bankMax: 0.16, dolly: 0.05, glow: 0.22, spin: 1 },   // 4 toupie
+  { f: 0.9, z: 0.55, bank: 0.25, bankMax: 0.12, dolly: 0.03, glow: 0.15, range: 0.3, magnet: 1 },   // 5 aimant
+];
 // au démarrage la fenêtre peut encore faire 0 px : une position invalide figerait la caméra pour de bon
 const onMouse = e => {
   const w = innerWidth || screen.width, h = innerHeight || screen.height;
@@ -751,7 +793,7 @@ window.wallpaperPropertyListener = {
       savedProps = Object.assign({}, savedProps, p);
       try { sessionStorage.setItem('lorenzProps', JSON.stringify(savedProps)); } catch (e) { /* stockage indisponible */ }
     }
-    const num = ['spdIn', 'spdOut', 'count', 'trail', 'speed', 'hueSpeed', 'spread', 'bloom', 'brightness', 'heads', 'autoRotate', 'smooth', 'sway', 'morph', 'mouseStrength', 'stars', 'nebula', 'audioGain',
+    const num = ['spdIn', 'spdOut', 'count', 'trail', 'speed', 'hueSpeed', 'spread', 'bloom', 'brightness', 'heads', 'autoRotate', 'smooth', 'sway', 'morph', 'mouseStrength', 'move', 'stars', 'nebula', 'audioGain',
       'touch', 'tilt', 'recenter', 'fps'];                 // ces derniers ne viennent que de l'appli Android
     let realloc = false, pal = false;
     for (const k of num) if (p[k]) { const v = +p[k].value; if (k === 'count' || k === 'trail') realloc ||= v !== cfg[k]; cfg[k] = v; }
@@ -812,6 +854,7 @@ function bindCommon(u, cam) {
   gl.uniform1f(u.uTime, cam.t); gl.uniform1f(u.uHueSpeed, cfg.hueSpeed); gl.uniform1f(u.uSpread, cfg.spread);
   gl.uniform1f(u.uRainbow, cfg.palette === 0 ? 1 : 0);
   gl.uniform3fv(u.uPal, palRGB);
+  gl.uniform2f(u.uShift, cam.shift[0], cam.shift[1]);
 }
 
 const rotBuf = new Float32Array(9);
@@ -1094,23 +1137,68 @@ function draw(now) {
   // souris : position absolue -> angle (±2 rad sur chaque axe), l'angle reste où on le laisse.
   // La face avant de l'attracteur suit le curseur dans les deux axes (avant, l'axe horizontal était inversé).
   // L'écart au repos est ramené dans le repère de l'image avant sa rotation, pour rester juste sur écran vertical.
-  const k = 1 - Math.pow(0.0005, dt);
-  const tx = cfg.mouse && !MOBILE ? mxT * cfg.mouseStrength : 0, ty = cfg.mouse && !MOBILE ? myT * cfg.mouseStrength : 0.2;
-  mx += (tx - mx) * k; my += (ty - my) * k;
-  if (!Number.isFinite(mx) || !Number.isFinite(my)) { mx = tx; my = ty; }
+  // Le style choisi (MOVES) décide comment la caméra rejoint la position visée.
+  const mv = MOVES[cfg.move | 0] || MOVES[1], on = cfg.mouse && !MOBILE;
+  const range = mv.range ?? 1, str = cfg.mouseStrength;
+  // toupie : l'axe horizontal ne vise plus un angle, il lance la rotation (vers la droite -> la face avant part à droite)
+  const tx = on && !mv.spin ? mxT * str * range : 0;
+  const ty = on ? myT * str * range + 0.2 * (1 - range) : 0.2;
+  if (mv.classic) {                                      // simple lissage, s'arrête net
+    const k = 1 - Math.pow(0.0005, dt);
+    mx += (tx - mx) * k; my += (ty - my) * k; mvx = mvy = 0;
+  } else {
+    // ressort amorti, calculé par pas de 1/240 s pour rester stable même quand les images sont espacées
+    const sw = 2 * Math.PI * mv.f, sz = mv.z, stx = on ? mxT * str * 0.18 : 0, sty = on ? -myT * str * 0.18 : 0;
+    for (let left = Math.min(dt, 0.25); left > 1e-6; left -= 1 / 240) {
+      const h = Math.min(left, 1 / 240), kk = sw * sw, cc = 2 * sz * sw;
+      mvx += (kk * (tx - mx) - cc * mvx) * h; mx += mvx * h;
+      mvy += (kk * (ty - my) - cc * mvy) * h; my += mvy * h;
+      if (mv.magnet) {                                   // aimant : l'attracteur glisse vers le curseur (jusqu'à 18 % de l'écran)
+        shvx += (kk * (stx - shx) - cc * shvx) * h; shx += shvx * h;
+        shvy += (kk * (sty - shy) - cc * shvy) * h; shy += shvy * h;
+      }
+    }
+  }
+  if (!mv.magnet) {                                      // hors aimant, le décalage revient doucement au centre
+    const kb = 1 - Math.exp(-dt * 4); shx -= shx * kb; shy -= shy * kb; shvx = shvy = 0;
+  }
+  if (mv.spin && on) {                                   // toupie : un geste lance, puis ça ralentit tout seul (~2 s)
+    const d = mxT - lastMx;
+    if (Math.abs(d) < 1) spinV = Math.max(-6, Math.min(6, spinV - d * 7 * str));
+  }
+  lastMx = mxT;
+  spinV *= Math.exp(-dt / (mv.spin ? 1.8 : 0.4));        // hors toupie, l'élan restant s'éteint vite
+  if (Math.abs(spinV) < 1e-4) spinV = 0;
+  spin += spinV * dt;
+  if (![mx, my, mvx, mvy, shx, shy, shvx, shvy, spin, spinV].every(Number.isFinite)) {
+    mx = tx; my = ty; mvx = mvy = shx = shy = shvx = shvy = spin = spinV = 0;
+  }
+  // effet du mouvement, lissé (monte vite, redescend en ~0,5 s) : 0 au repos, 1 pour un grand geste rapide
+  const speed = mv.classic ? 0 : Math.max(Math.hypot(mvx, mvy) / 4, Math.abs(spinV) / 5, Math.hypot(shvx, shvy) / 0.8);
+  const motionT = MOBILE ? 0 : Math.min(1, speed);
+  motion += (motionT - motion) * (1 - Math.exp(-dt * (motionT > motion ? 10 : 3)));
+  const bankV = mv.magnet ? shvx : mv.spin ? -spinV * 0.5 : mvx;
+  const bank = MOBILE || mv.classic ? 0 : Math.max(-mv.bankMax, Math.min(mv.bankMax, -bankV * mv.bank));
+  // apesanteur : flotte doucement, même quand la souris ne bouge pas
+  const fl = mv.float && !MOBILE ? 1 : 0;
   const ex = mx, ey = my - 0.2, cR = Math.cos(rollFix), sR = Math.sin(rollFix);
   const cam = {
     t: t + t0,
-    yaw: yaw + Math.sin(T * 0.11) * 0.5 * cfg.sway - (cR * ex - sR * ey) * 2,
-    pitch: Math.sin(T * 0.13) * 0.32 * cfg.sway + 0.4 + (sR * ex + cR * ey) * 2,
-    dist: 3.6 + Math.sin(T * 0.09) * 0.45 * cfg.sway - bass * 0.2,
-    roll: Math.sin(T * 0.07) * 0.16 * cfg.sway + rollFix,
+    yaw: yaw + spin + Math.sin(T * 0.11) * 0.5 * cfg.sway - (cR * ex - sR * ey) * 2
+      + fl * (Math.sin(T * 0.21) * 0.07 + Math.sin(T * 0.13 + 1.3) * 0.05),
+    pitch: Math.sin(T * 0.13) * 0.32 * cfg.sway + 0.4 + (sR * ex + cR * ey) * 2 + fl * Math.sin(T * 0.17 + 0.7) * 0.06,
+    dist: (3.6 + Math.sin(T * 0.09) * 0.45 * cfg.sway - bass * 0.2) * (1 + fl * Math.sin(T * 0.09 + 2) * 0.02),
+    // la caméra penche dans les virages (comme un avion)
+    roll: Math.sin(T * 0.07) * 0.16 * cfg.sway + rollFix + bank + fl * Math.sin(T * 0.11 + 2.1) * 0.035,
+    shift: [shx, shy],
     focal: 1 / Math.tan((38 * Math.PI / 180) / 2),
   };
   cam.dist *= cfg.zoom > 0 ? cfg.zoom : portrait ? Math.min(2.2, Math.max(1, 0.72 / aspect)) : 1;
+  cam.dist *= 1 + motion * (mv.dolly || 0);             // recule un peu pendant un geste rapide, revient au repos
   cam.rot = rotation(cam.yaw, cam.pitch, cam.roll);
   if (MOBILE) applyMobile(cam, dt);                      // doigt, gyroscope : rotations dans le repère de l'écran
-  if (DEBUG) window.__cam = { rot: Array.from(cam.rot), dist: cam.dist, yaw: cam.yaw, pitch: cam.pitch };
+  curMove = mv;
+  if (DEBUG) window.__cam = { rot: Array.from(cam.rot), dist: cam.dist, yaw: cam.yaw, pitch: cam.pitch, roll: cam.roll, shift: cam.shift.slice(), motion };
 
   // 1. scène (traînées 3D + têtes) en HDR, additive, MSAA si possible
   gl.bindFramebuffer(gl.FRAMEBUFFER, ms ? ms.fb : scene.fb);
@@ -1118,7 +1206,7 @@ function draw(now) {
   gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
   gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
   const density = Math.sqrt(900 / N) * (HDR ? 1 : 0.5);
-  const intensity = 0.13 * density * cfg.brightness * (1 + bass * 0.5);
+  const intensity = 0.13 * density * cfg.brightness * (1 + bass * 0.5) * (1 + motion * (curMove.glow || 0));   // éclat pendant les gestes
 
   gl.useProgram(P_LINE.p); bindCommon(P_LINE.u, cam);
   gl.uniform1f(P_LINE.u.uIntensity, intensity);

@@ -116,7 +116,21 @@ final class Prefs {
         }
     }
 
-    /** Palette choisie (0 à 5), pour les couleurs proposées au système (thème Material You). */
+    /** Couleur « Perso » enregistrée (color=rrggbb), opaque, ou 0 s'il n'y en a pas. */
+    static int customColor(Context c) {
+        for (String kv : query(c).split("&")) {
+            if (kv.startsWith("color=") && kv.length() == 12) {
+                try {
+                    return 0xFF000000 | Integer.parseInt(kv.substring(6), 16);
+                } catch (NumberFormatException ignored) {
+                    break;
+                }
+            }
+        }
+        return 0;
+    }
+
+    /** Palette choisie (0 à 14), pour les couleurs proposées au système (thème Material You). */
     static int palette(Context c) {
         for (String kv : query(c).split("&")) {
             if (kv.startsWith("palette=")) {

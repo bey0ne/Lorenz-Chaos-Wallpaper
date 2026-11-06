@@ -22,10 +22,11 @@ verticalement pour l'incliner (vue de dessus, de profil, par la tranche). Sa fac
 ## Réglages
 
 Tous modifiables dans le panneau du fond d'écran : palette (Spectre, Néon, Aurore, Braise, Glacier,
-Or, couleur du thème), couleurs du ciel (comme les traînées, Hubble, Néon, Aurore, Braise, Glacier, Or,
+Or, couleur du thème, et les thèmes Synthwave, Feu et glace, Sakura, Abysses, Opale, Cosmos, Rubis,
+Terminal, chacun avec son ciel assorti), couleurs du ciel (comme les traînées, Hubble, Néon, Aurore, Braise, Glacier, Or,
 Améthyste, Émeraude, noir et blanc ou couleur choisie), nombre de particules, longueur des traînées, vitesse, luminosité, halo,
 lissage des courbes, qualité (auto / maximale), anticrénelage (analytique / MSAA), rotation automatique, balancement de la caméra et respiration de la forme
-(désactivés par défaut), souris, étoiles, nébuleuse, sensibilité audio, départ en ruban.
+(désactivés par défaut), souris (amplitude, style de mouvement : classique, fluide, élastique, apesanteur, toupie ou aimant), étoiles, nébuleuse, sensibilité audio, départ en ruban.
 
 Dans un navigateur, les mêmes réglages passent en paramètres d'URL, par ex.
 `index.html?palette=3&count=1500&trail=250`.
